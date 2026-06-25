@@ -42,22 +42,30 @@ function createAndShuffleDeck() {
     return deck;
 }
 
+// Automatically clears logs 10 seconds after they are posted
 function addToLog(message) {
-    const logEntry = { id: Date.now() + Math.random(), text: message };
+    const logId = Date.now() + Math.random();
+    const logEntry = { id: logId, text: message };
     gameState.log.push(logEntry);
-    if (gameState.log.length > 15) gameState.log.shift();
+    
+    broadcastState();
+
+    setTimeout(() => {
+        gameState.log = gameState.log.filter(entry => entry.id !== logId);
+        broadcastState();
+    }, 10000);
 }
 
 function resetGameStructure() {
     gameState.deck = createAndShuffleDeck();
     gameState.players.forEach(p => {
-        p.hand = gameState.deck.splice(0, 4); // Exactly 4 cards per player
+        p.hand = gameState.deck.splice(0, 4); // Rule 2: Each player gets exactly 4 cards
         p.folds = 0;
         p.foldedRanks = [];
     });
     gameState.currentTurnIndex = 0;
     gameState.log = [];
-    addToLog("The arena match has officially begun! 🃏");
+    addToLog("The match has begun! 🃏");
 }
 
 function broadcastState() {
@@ -75,7 +83,7 @@ function broadcastState() {
             yourHand: p.hand,
             players: maskedPlayers,
             deckCount: gameState.deck.length,
-            log: gameState.log.map(entry => entry.text),
+            log: gameState.log, // Sends full object array with unique IDs
             isYourTurn: idx === gameState.currentTurnIndex,
             gameStarted: gameState.gameStarted
         });
@@ -84,8 +92,9 @@ function broadcastState() {
 
 io.on('connection', (socket) => {
     socket.on('join_game', (name) => {
+        // Rule 1: 2 to 6 players can join
         if (gameState.gameStarted || gameState.players.length >= 6) {
-            socket.emit('error_message', "Game full or already started.");
+            socket.emit('error_message', "Game full or already in progress.");
             return;
         }
         gameState.players.push({ 
@@ -126,6 +135,7 @@ io.on('connection', (socket) => {
         const targetPlayer = gameState.players.find(p => p.id === targetId);
         if (!targetPlayer) return;
 
+        // Rule 3: Player can ask anyone in the game for a specific card
         io.emit('card_requested', {
             targetId: targetId,
             rank: rank,
@@ -141,22 +151,19 @@ io.on('connection', (socket) => {
         if (!currentPlayer || !targetPlayer) return;
 
         if (action === 'give') {
-            // Find the index of just ONE matching card
+            // Rule 4: Targets yield exactly ONE card per successful ask
             const cardIndex = targetPlayer.hand.findIndex(c => c.rank === rank);
             
             if (cardIndex !== -1) {
-                // Remove exactly ONE card from target and push to asker
                 const [movedCard] = targetPlayer.hand.splice(cardIndex, 1);
                 currentPlayer.hand.push(movedCard);
                 
-                addToLog(`🎯 ${currentPlayer.name} took exactly ONE [${rank}] card from ${targetPlayer.name}!`);
+                addToLog(`🎯 ${currentPlayer.name} took ONE [${rank}] from ${targetPlayer.name}!`);
                 io.emit('sound_trigger', 'success');
-                // Note: It stays the currentPlayer's turn because they guessed correctly!
             }
         } else if (action === 'fish') {
             addToLog(`🐟 ${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s. Go Fish!`);
             io.emit('sound_trigger', 'fish');
-            // Turn automatically passes to the next player only on a Go Fish
             gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
         }
         broadcastState();
@@ -166,11 +173,11 @@ io.on('connection', (socket) => {
         const currentPlayer = gameState.players[gameState.currentTurnIndex];
         if (!currentPlayer || socket.id !== currentPlayer.id || gameState.deck.length === 0) return;
 
+        // Rule 5: Drawing from the deck immediately ends the turn
         const drawnCard = gameState.deck.pop();
         currentPlayer.hand.push(drawnCard);
         addToLog(`🃏 ${currentPlayer.name} drew a card from the deck.`);
 
-        // Turn passes to the next player after drawing
         gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
         io.emit('sound_trigger', 'draw');
         broadcastState();
