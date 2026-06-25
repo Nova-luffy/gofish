@@ -7,7 +7,6 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Middleware for HTTPS redirect
 app.use((req, res, next) => {
     if (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-proto'] !== 'https') {
         return res.redirect(`https://${req.headers.host}${req.url}`);
@@ -17,8 +16,6 @@ app.use((req, res, next) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- MULTI-ROOM MANAGEMENT SYSTEM ---
-// Stores states for separate rooms dynamically (e.g., rooms["room1"] = { players: [], deck: [] })
 let rooms = {};
 
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
@@ -38,7 +35,6 @@ function createAndShuffleDeck() {
     return deck;
 }
 
-// Generates a stripped-down version of the game state tailored specifically for an individual player
 function getCleanStateForPlayer(roomName, socketId) {
     const room = rooms[roomName];
     if (!room) return {};
@@ -64,7 +60,6 @@ function getCleanStateForPlayer(roomName, socketId) {
 function broadcastRoomState(roomName) {
     const room = rooms[roomName];
     if (!room) return;
-
     room.players.forEach(p => {
         io.to(p.id).emit('state_update', getCleanStateForPlayer(roomName, p.id));
     });
@@ -78,13 +73,11 @@ function updateLobbyNames(roomName) {
 }
 
 io.on('connection', (socket) => {
-    // Keep track of which room this specific connection belongs to
     let currentRoom = null;
 
     socket.on('join_game', (data) => {
-        // Support either a string (just name) or an object containing room information
         let name = "";
-        let roomName = "Default_Arena"; // Backwards compatible fallback
+        let roomName = "default_arena";
 
         if (typeof data === 'object' && data !== null) {
             name = data.name || "Anonymous";
@@ -93,10 +86,8 @@ io.on('connection', (socket) => {
             name = String(data);
         }
 
-        // Clean up empty strings
         if (!roomName) roomName = "default_arena";
 
-        // Initialize the room entry if it doesn't exist yet
         if (!rooms[roomName]) {
             rooms[roomName] = {
                 players: [],
@@ -104,7 +95,8 @@ io.on('connection', (socket) => {
                 currentTurnIndex: 0,
                 gameStarted: false,
                 log: [],
-                chatHistory: []
+                chatHistory: [],
+                awaitingFishDraw: false // Track if active player must draw and pass
             };
         }
 
@@ -115,7 +107,7 @@ io.on('connection', (socket) => {
             return;
         }
         if (room.players.length >= 6) {
-            socket.emit('error_message', "This room is full (Max 6 players). Try another room name!");
+            socket.emit('error_message', "This room is full (Max 6 players).");
             return;
         }
 
@@ -130,9 +122,7 @@ io.on('connection', (socket) => {
             foldedRanks: []
         });
 
-        // Sync fresh user with existing chat history of that specific room
         socket.emit('update_chat', room.chatHistory);
-        
         updateLobbyNames(roomName);
         broadcastRoomState(roomName);
     });
@@ -142,13 +132,14 @@ io.on('connection', (socket) => {
         const room = rooms[currentRoom];
 
         if (room.players.length < 2) {
-            socket.emit('error_message', "Need at least 2 players in this room to start.");
+            socket.emit('error_message', "Need at least 2 players to start.");
             return;
         }
 
         room.deck = createAndShuffleDeck();
         room.gameStarted = true;
         room.currentTurnIndex = 0;
+        room.awaitingFishDraw = false;
         room.log = [];
 
         for (let player of room.players) {
@@ -170,9 +161,19 @@ io.on('connection', (socket) => {
 
         const activePlayer = room.players[room.currentTurnIndex];
         if (!activePlayer || activePlayer.id !== socket.id) return;
+        if (room.awaitingFishDraw) {
+            socket.emit('error_message', "You must draw from the deck first!");
+            return;
+        }
 
         const targetPlayer = room.players.find(p => p.id === data.targetId);
         if (!targetPlayer) return;
+
+        // RULE 2: Broadcast the asking card status openly to everyone's active log
+        room.log.push({ 
+            id: Date.now(), 
+            text: `👀 ${activePlayer.name} asked ${targetPlayer.name} for a [ ${data.rank} ]` 
+        });
 
         io.to(targetPlayer.id).emit('card_requested', {
             askerId: socket.id,
@@ -180,6 +181,8 @@ io.on('connection', (socket) => {
             rank: data.rank,
             targetId: targetPlayer.id
         });
+        
+        broadcastRoomState(currentRoom);
     });
 
     socket.on('resolve_request', (data) => {
@@ -195,13 +198,17 @@ io.on('connection', (socket) => {
             if (cardIndex !== -1) {
                 const card = targetPlayer.hand.splice(cardIndex, 1)[0];
                 askerPlayer.hand.push(card);
-                room.log.push({ id: Date.now(), text: ` card given! ${targetPlayer.name} handed a [ ${data.rank} ] to ${askerPlayer.name}.` });
+                room.log.push({ id: Date.now(), text: `✅ Card Handover! ${targetPlayer.name} given a [ ${data.rank} ] to ${askerPlayer.name}.` });
                 io.to(currentRoom).emit('sound_trigger', 'success');
+                // Asker successfully guessed! They get to go again, no turn advancement.
             }
         } else if (data.action === 'fish') {
-            room.log.push({ id: Date.now(), text: ` Go Fish! ${targetPlayer.name} told ${askerPlayer.name} to go fish.` });
+            // RULE 1: Target player says Go Fish!
+            room.log.push({ id: Date.now(), text: `🌊 "Go Fish!" — ${targetPlayer.name} does not have it.` });
             io.to(currentRoom).emit('sound_trigger', 'fish');
-            room.currentTurnIndex = (room.currentTurnIndex + 1) % room.players.length;
+            
+            // Flag that the active player must draw a card to conclude their sequence
+            room.awaitingFishDraw = true;
         }
 
         broadcastRoomState(currentRoom);
@@ -217,8 +224,23 @@ io.on('connection', (socket) => {
         if (room.deck.length > 0) {
             const card = room.deck.pop();
             activePlayer.hand.push(card);
-            room.log.push({ id: Date.now(), text: `🎴 ${activePlayer.name} drew a card from the deck pile.` });
+            room.log.push({ id: Date.now(), text: `🎴 ${activePlayer.name} drew a card from the deck.` });
+            
+            // RULE 1 & 3: If drawing as a consequence of a Go Fish call, pass the turn instantly
+            if (room.awaitingFishDraw) {
+                room.awaitingFishDraw = false;
+                room.currentTurnIndex = (room.currentTurnIndex + 1) % room.players.length;
+                room.log.push({ id: Date.now(), text: `⏱️ Turn concluded. Next player's turn.` });
+            }
+            
             broadcastRoomState(currentRoom);
+        } else {
+            // If deck is empty when forced to draw, skip turn anyway
+            if (room.awaitingFishDraw) {
+                room.awaitingFishDraw = false;
+                room.currentTurnIndex = (room.currentTurnIndex + 1) % room.players.length;
+                broadcastRoomState(currentRoom);
+            }
         }
     });
 
@@ -244,7 +266,7 @@ io.on('connection', (socket) => {
         }
 
         if (foldedAny) {
-            room.log.push({ id: Date.now(), text: `🎁 ${player.name} completed and folded a set of 4-of-a-kind!` });
+            room.log.push({ id: Date.now(), text: `🎁 ${player.name} folded a completed set of 4-of-a-kind!` });
             io.to(currentRoom).emit('sound_trigger', 'fold');
         } else {
             socket.emit('error_message', "No 4-of-a-kind sets found to fold.");
@@ -257,6 +279,7 @@ io.on('connection', (socket) => {
         const room = rooms[currentRoom];
         room.deck = [];
         room.gameStarted = false;
+        room.awaitingFishDraw = false;
         room.log = [];
         broadcastRoomState(currentRoom);
     });
@@ -278,9 +301,8 @@ io.on('connection', (socket) => {
         if (currentRoom && rooms[currentRoom]) {
             socket.leave(currentRoom);
             rooms[currentRoom].players = rooms[currentRoom].players.filter(p => p.id !== socket.id);
-            
             if (rooms[currentRoom].players.length === 0) {
-                delete rooms[currentRoom]; // Wipe memory if room is empty
+                delete rooms[currentRoom];
             } else {
                 rooms[currentRoom].currentTurnIndex = rooms[currentRoom].currentTurnIndex % rooms[currentRoom].players.length;
                 updateLobbyNames(currentRoom);
@@ -305,4 +327,4 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🚀 Rooms Arena server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
