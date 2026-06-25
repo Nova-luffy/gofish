@@ -78,7 +78,7 @@ io.on('connection', (socket) => {
         }
         gameState.deck = createAndShuffleDeck();
         gameState.players.forEach(p => {
-            p.hand = gameState.deck.splice(0, 5); // 5 cards each for a better start
+            p.hand = gameState.deck.splice(0, 4); // 4 cards each for a better start
         });
         gameState.gameStarted = true;
         gameState.currentTurnIndex = 0;
