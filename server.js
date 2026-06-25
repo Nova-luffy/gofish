@@ -33,24 +33,9 @@ function createAndShuffleDeck() {
     return deck;
 }
 
-function checkForFolds(player) {
-    const counts = {};
-    player.hand.forEach(card => {
-        counts[card.rank] = (counts[card.rank] || 0) + 1;
-    });
-
-    for (let rank in counts) {
-        if (counts[rank] === 4) {
-            player.hand = player.hand.filter(card => card.rank !== rank);
-            player.folds += 1;
-            addToLog(`${player.name} folded a set of ${rank}s!`);
-        }
-    }
-}
-
 function addToLog(message) {
     gameState.log.push(message);
-    if (gameState.log.length > 10) gameState.log.shift();
+    if (gameState.log.length > 8) gameState.log.shift();
 }
 
 function broadcastState() {
@@ -87,18 +72,17 @@ io.on('connection', (socket) => {
     });
 
     socket.on('start_game', () => {
-        // Lowered from 4 to 2 players for easier testing!
         if (gameState.players.length < 2) {
             socket.emit('error_message', "Need at least 2 players to start.");
             return;
         }
         gameState.deck = createAndShuffleDeck();
         gameState.players.forEach(p => {
-            p.hand = gameState.deck.splice(0, 4);
+            p.hand = gameState.deck.splice(0, 5); // 5 cards each for a better start
         });
         gameState.gameStarted = true;
         gameState.currentTurnIndex = 0;
-        addToLog("The game has begun!");
+        gameState.log = ["The game has begun!"];
         broadcastState();
     });
 
@@ -124,36 +108,55 @@ io.on('connection', (socket) => {
         if (!currentPlayer || !targetPlayer) return;
 
         if (action === 'give') {
+            // FIXED FLAW: Splice and move ALL matching cards instead of just one!
             const cardsToMove = targetPlayer.hand.filter(c => c.rank === rank);
             targetPlayer.hand = targetPlayer.hand.filter(c => c.rank !== rank);
             currentPlayer.hand.push(...cardsToMove);
 
-            addToLog(`${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s and received ${cardsToMove.length} card(s).`);
-            checkForFolds(currentPlayer);
+            addToLog(`🎯 ${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s and took ALL (${cardsToMove.length} card(s)).`);
         } else if (action === 'fish') {
-            addToLog(`${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s. Go Fish!`);
-            if (gameState.deck.length > 0) {
-                const drawnCard = gameState.deck.pop();
-                currentPlayer.hand.push(drawnCard);
-            }
-            checkForFolds(currentPlayer);
+            addToLog(`🐟 ${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s. Go Fish!`);
             gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
         }
 
         broadcastState();
     });
 
-    socket.on('draw_card', () => {
-        const currentPlayer = gameState.players[gameState.currentTurnIndex];
-        if (socket.id !== currentPlayer.id) return;
+    // Manual Function: Pulls a card from the deck pile
+    socket.on('draw_from_deck', () => {
+        const currentPlayer = gameState.players.find(p => p.id === socket.id);
+        if (!currentPlayer || gameState.deck.length === 0) return;
 
-        if (gameState.deck.length > 0) {
-            const drawnCard = gameState.deck.pop();
-            currentPlayer.hand.push(drawnCard);
-            addToLog(`${currentPlayer.name} opted to draw a card from the deck.`);
+        const drawnCard = gameState.deck.pop();
+        currentPlayer.hand.push(drawnCard);
+        addToLog(`🃏 ${currentPlayer.name} drew a card from the deck.`);
+        broadcastState();
+    });
+
+    // Manual Function: Checks hand and auto-folds sets of 4 matching cards
+    socket.on('manual_fold_check', () => {
+        const player = gameState.players.find(p => p.id === socket.id);
+        if (!player) return;
+
+        const counts = {};
+        player.hand.forEach(card => {
+            counts[card.rank] = (counts[card.rank] || 0) + 1;
+        });
+
+        let foldedAny = false;
+        for (let rank in counts) {
+            if (counts[rank] === 4) {
+                player.hand = player.hand.filter(card => card.rank !== rank);
+                player.folds += 1;
+                addToLog(`✨ ${player.name} laid down a matching Fold of ${rank}s!`);
+                foldedAny = true;
+            }
         }
-        checkForFolds(currentPlayer);
-        gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
+
+        if (!foldedAny) {
+            socket.emit('error_message', "No 4-of-a-kind sets found in your hand to fold!");
+        }
+
         broadcastState();
     });
 

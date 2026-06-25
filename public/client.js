@@ -11,6 +11,7 @@ socket.on('state_update', (state) => {
 
     currentHand = state.yourHand || [];
     
+    // Sort and render hand cards with dynamic CSS multiline wrapping active
     const handDiv = document.getElementById('your-hand');
     handDiv.innerHTML = currentHand.map(c => {
         const isRed = c.suit === '♥' || c.suit === '♦';
@@ -29,6 +30,13 @@ socket.on('state_update', (state) => {
     }
 
     document.getElementById('ask-btn').disabled = !state.isYourTurn;
+
+    // Render the dynamic Turn Completion History tracking elements
+    const historyBox = document.getElementById('history-log-box');
+    historyBox.innerHTML = (state.log || []).map(line => `
+        <div class="log-line">${line}</div>
+    `).join('');
+    historyBox.scrollTop = historyBox.scrollHeight; // Auto-scrolls to the newest logs
 
     const oppList = document.getElementById('opponents-list');
     oppList.innerHTML = state.players
@@ -59,11 +67,14 @@ socket.on('card_requested', (data) => {
     
     const holdsCard = currentHand.some(card => card.rank === data.rank);
     
-    // Strict Verification Blocking: Block lying about having cards
     document.getElementById('modal-fish-btn').disabled = holdsCard;
     document.getElementById('modal-give-btn').disabled = !holdsCard;
     
     document.getElementById('request-modal').style.display = 'flex';
+});
+
+socket.on('error_message', (msg) => {
+    alert(msg);
 });
 
 function joinLobby() {
@@ -80,6 +91,14 @@ function submitAsk() {
     const rank = document.getElementById('target-rank-select').value;
     if(!targetId || !rank) return alert("Select a player and rank!");
     socket.emit('ask_card', { targetId, rank });
+}
+
+function drawFromDeck() {
+    socket.emit('draw_from_deck');
+}
+
+function triggerManualFold() {
+    socket.emit('manual_fold_check');
 }
 
 function respondGive() {
