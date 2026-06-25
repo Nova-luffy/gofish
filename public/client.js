@@ -58,9 +58,13 @@ socket.on('state_update', (data) => {
         </div>`
     ).join('');
 
-    const rankSelect = document.getElementById('target-rank-select');
-    const uniqueRanks = [...new Set(data.yourHand.map(c => c.rank))];
-    rankSelect.innerHTML = uniqueRanks.map(r => `<option value="${r}">${r}</option>`).join('');
+const rankSelect = document.getElementById('target-rank-select');
+    const allRanks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+    
+    // Only rebuild the dropdown if it's empty so it doesn't reset your selection mid-turn
+    if (rankSelect.innerHTML === '') {
+        rankSelect.innerHTML = allRanks.map(r => `<option value="${r}">${r}</option>`).join('');
+    }
 
     const controls = document.getElementById('action-controls');
     controls.style.opacity = myTurn ? "1" : "0.4";
@@ -71,7 +75,10 @@ function submitAsk() {
     if (!myTurn) return;
     const targetId = document.getElementById('target-player-select').value;
     const rank = document.getElementById('target-rank-select').value;
+    
     if(!targetId || !rank) return alert("Select a player and rank!");
+    
+    // Fixed: Sending 'targetId' instead of 'targetPlayerId'
     socket.emit('ask_card', { targetId, rank });
 }
 
