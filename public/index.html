@@ -41,8 +41,9 @@
 
         <!-- Lobby Sign In -->
         <div id="lobby-view" class="section">
-            <input type="text" id="username-input" placeholder="Enter Nickname" style="padding:10px; width:100%; border-radius:6px; margin-bottom:10px;">
-            <button onclick="joinLobby()">Join Lobby</button>
+            <input type="text" id="username-input" placeholder="Enter Nickname" style="padding:10px; width:100%; border-radius:6px; margin-bottom:10px; color:black;">
+            <button onclick="joinLobby()" style="margin-bottom:10px;">Join Lobby</button>
+            <button onclick="socket.emit('start_game')" style="background:#10b981;">Start Game (Needs 4+ Players)</button>
         </div>
 
         <!-- Main Game Board -->
