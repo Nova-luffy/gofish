@@ -32,8 +32,12 @@ socket.on('state_update', (state) => {
     document.getElementById('ask-btn').disabled = !state.isYourTurn;
 
     // ⏱️ UPDATED: Render the log lines and set up individual 10-second self-destruct timers
+    // Render the logs exactly as the server maintains them
     const historyBox = document.getElementById('history-log-box');
-    historyBox.innerHTML = ''; // Clear box first to handle incoming updates safely
+    historyBox.innerHTML = (state.log || []).map(line => `
+        <div class="log-line">${line}</div>
+    `).join('');
+    historyBox.scrollTop = historyBox.scrollHeight;
 
     (state.log || []).forEach((line, index) => {
         // Create a unique container for this specific log line

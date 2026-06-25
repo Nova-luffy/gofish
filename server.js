@@ -1,13 +1,12 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const path = require('path'); // Absolute path calculation utility module
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Fixed path flaw using absolute directory mapping variables
 app.use(express.static(path.join(__dirname, 'public')));
 
 let gameState = {
@@ -15,7 +14,7 @@ let gameState = {
     deck: [],           
     currentTurnIndex: 0,
     gameStarted: false,
-    log: []
+    log: [] // Holds active logs that haven't expired yet
 };
 
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
@@ -35,9 +34,16 @@ function createAndShuffleDeck() {
     return deck;
 }
 
+// ⏱️ UPDATED: Adds a log entry and sets a backend timer to erase it after 10 seconds
 function addToLog(message) {
-    gameState.log.push(message);
-    if (gameState.log.length > 8) gameState.log.shift();
+    const logEntry = { id: Date.now() + Math.random(), text: message };
+    gameState.log.push(logEntry);
+
+    // After exactly 10 seconds (10000ms), remove this specific message from the server memory
+    setTimeout(() => {
+        gameState.log = gameState.log.filter(entry => entry.id !== logEntry.id);
+        broadcastState(); // Tell all clients to update their screen without this expired message
+    }, 10000);
 }
 
 function broadcastState() {
@@ -50,11 +56,12 @@ function broadcastState() {
             isCurrentTurn: oIdx === gameState.currentTurnIndex
         }));
 
+        // Send only the text of the unexpired logs to the client
         io.to(p.id).emit('state_update', {
             yourHand: p.hand,
             players: maskedPlayers,
             deckCount: gameState.deck.length,
-            log: gameState.log,
+            log: gameState.log.map(entry => entry.text), 
             isYourTurn: idx === gameState.currentTurnIndex
         });
     });
@@ -84,7 +91,7 @@ io.on('connection', (socket) => {
         });
         gameState.gameStarted = true;
         gameState.currentTurnIndex = 0;
-        gameState.log = ["The game has begun!"];
+        addToLog("The game has begun!");
         broadcastState();
     });
 
@@ -123,7 +130,6 @@ io.on('connection', (socket) => {
         broadcastState();
     });
 
-    // Enforced Rule: Drawing a card from the deck pile ALWAYS switches the turn instantly
     socket.on('draw_from_deck', () => {
         const currentPlayer = gameState.players[gameState.currentTurnIndex];
         
@@ -133,13 +139,11 @@ io.on('connection', (socket) => {
         currentPlayer.hand.push(drawnCard);
         addToLog(`🃏 ${currentPlayer.name} drew a card from the deck.`);
 
-        // Pass active turn state down immediately
         gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
 
         broadcastState();
     });
 
-    // Quiet Mode: Evaluates sets of 4 matching cards without writing log notifications
     socket.on('manual_fold_check', () => {
         const player = gameState.players.find(p => p.id === socket.id);
         if (!player) return;
