@@ -231,12 +231,17 @@ function createPeerConnection(targetId, isOffer) {
         }
     };
 
+    // Find this block inside createPeerConnection(targetId, isOffer)
     pc.ontrack = (event) => {
         let audioEl = document.getElementById(`audio-${targetId}`);
         if (!audioEl) {
             audioEl = document.createElement('audio');
             audioEl.id = `audio-${targetId}`;
             audioEl.autoplay = true;
+            
+            // --- ADD THIS LINE HERE ---
+            audioEl.controls = true; 
+            
             document.getElementById('remote-audio-streams-container').appendChild(audioEl);
         }
         audioEl.srcObject = event.streams[0];
