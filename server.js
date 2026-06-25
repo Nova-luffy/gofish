@@ -83,7 +83,7 @@ function broadcastState() {
             yourHand: p.hand,
             players: maskedPlayers,
             deckCount: gameState.deck.length,
-            log: gameState.log, // Sends full object array with unique IDs
+            log: gameState.log, 
             isYourTurn: idx === gameState.currentTurnIndex,
             gameStarted: gameState.gameStarted
         });
@@ -162,8 +162,19 @@ io.on('connection', (socket) => {
                 io.emit('sound_trigger', 'success');
             }
         } else if (action === 'fish') {
-            addToLog(`🐟 ${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s. Go Fish!`);
+            addToLog(`🐟 ${targetPlayer.name} said "Go Fish!" to ${currentPlayer.name}.`);
             io.emit('sound_trigger', 'fish');
+            
+            // FINAL RULE: Player automatically draws a card when told to Go Fish
+            if (gameState.deck.length > 0) {
+                const drawnCard = gameState.deck.pop();
+                currentPlayer.hand.push(drawnCard);
+                addToLog(`🃏 ${currentPlayer.name} drew a card from the deck.`);
+            } else {
+                addToLog(`⚠️ The deck is empty! No card was drawn.`);
+            }
+
+            // Turn passes after the forced draw
             gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
         }
         broadcastState();
@@ -173,10 +184,10 @@ io.on('connection', (socket) => {
         const currentPlayer = gameState.players[gameState.currentTurnIndex];
         if (!currentPlayer || socket.id !== currentPlayer.id || gameState.deck.length === 0) return;
 
-        // Rule 5: Drawing from the deck immediately ends the turn
+        // Rule 5: Drawing from the deck manually immediately ends the turn
         const drawnCard = gameState.deck.pop();
         currentPlayer.hand.push(drawnCard);
-        addToLog(`🃏 ${currentPlayer.name} drew a card from the deck.`);
+        addToLog(`🃏 ${currentPlayer.name} drew a card from the deck manually.`);
 
         gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
         io.emit('sound_trigger', 'draw');
@@ -212,21 +223,3 @@ io.on('connection', (socket) => {
 
     socket.on('leave_game', () => {
         gameState.players = [];
-        gameState.deck = [];
-        gameState.gameStarted = false;
-        gameState.chatHistory = [];
-        gameState.log = [];
-        io.emit('global_logout_forced');
-    });
-
-    socket.on('disconnect', () => {
-        gameState.players = gameState.players.filter(p => p.id !== socket.id);
-        if (gameState.players.length === 0) gameState.gameStarted = false;
-        else gameState.currentTurnIndex = gameState.currentTurnIndex % gameState.players.length;
-        io.emit('room_update', gameState.players.map(p => p.name));
-        broadcastState();
-    });
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
