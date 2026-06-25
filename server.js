@@ -78,7 +78,7 @@ io.on('connection', (socket) => {
         }
         gameState.deck = createAndShuffleDeck();
         gameState.players.forEach(p => {
-            p.hand = gameState.deck.splice(0, 4); // 4 cards each for a better start
+            p.hand = gameState.deck.splice(0, 5); 
         });
         gameState.gameStarted = true;
         gameState.currentTurnIndex = 0;
@@ -108,12 +108,18 @@ io.on('connection', (socket) => {
         if (!currentPlayer || !targetPlayer) return;
 
         if (action === 'give') {
-            // FIXED FLAW: Splice and move ALL matching cards instead of just one!
-            const cardsToMove = targetPlayer.hand.filter(c => c.rank === rank);
-            targetPlayer.hand = targetPlayer.hand.filter(c => c.rank !== rank);
-            currentPlayer.hand.push(...cardsToMove);
-
-            addToLog(`🎯 ${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s and took ALL (${cardsToMove.length} card(s)).`);
+            // Find the index of exactly ONE card matching the requested rank
+            const cardIndex = targetPlayer.hand.findIndex(c => c.rank === rank);
+            
+            if (cardIndex !== -1) {
+                // Remove only ONE card from opponent hand
+                const [transferredCard] = targetPlayer.hand.splice(cardIndex, 1);
+                
+                // Push that single card to the asking player's hand
+                currentPlayer.hand.push(transferredCard);
+                
+                addToLog(`🎯 ${currentPlayer.name} asked ${targetPlayer.name} for a ${rank} and took ONE.`);
+            }
         } else if (action === 'fish') {
             addToLog(`🐟 ${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s. Go Fish!`);
             gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
@@ -122,7 +128,6 @@ io.on('connection', (socket) => {
         broadcastState();
     });
 
-    // Manual Function: Pulls a card from the deck pile
     socket.on('draw_from_deck', () => {
         const currentPlayer = gameState.players.find(p => p.id === socket.id);
         if (!currentPlayer || gameState.deck.length === 0) return;
@@ -133,7 +138,6 @@ io.on('connection', (socket) => {
         broadcastState();
     });
 
-    // Manual Function: Checks hand and auto-folds sets of 4 matching cards
     socket.on('manual_fold_check', () => {
         const player = gameState.players.find(p => p.id === socket.id);
         if (!player) return;

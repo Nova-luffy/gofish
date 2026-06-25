@@ -14,7 +14,7 @@
         .opponent-card { border: 2px solid #64748b; padding: 10px; border-radius: 6px; min-width: 110px; text-align: center; background: #1e293b; }
         .active-turn { border-color: #10b981; background: #064e3b; }
         
-        /* Fixed Flaw: Multiline wrapping layout configuration for your cards hand */
+        /* Dynamic Multiline Hand wrapping display box grid */
         .hand-flex { display: flex; gap: 10px; flex-wrap: wrap; padding: 12px 0; justify-content: flex-start; }
         .card { background: white; color: black; border-radius: 6px; padding: 12px 8px; font-weight: bold; font-size: 1.1rem; text-align: center; width: calc(25% - 8px); min-width: 65px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
         .card.red { color: #dc2626; }
@@ -30,16 +30,18 @@
         .btn-fold { background: #10b981; }
         .btn-fold:hover { background: #047857; }
 
-        /* Turn Completion History column box styling */
+        /* Log tracker display panel container layout */
         .log-box { background: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #475569; max-height: 150px; overflow-y: auto; font-size: 0.9rem; margin-top: 5px; }
         .log-line { border-bottom: 1px solid #334155; padding: 4px 0; color: #cbd5e1; }
-        .log-line:last-child { border-none; }
+        .log-line:last-child { border-bottom: none; }
 
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; z-index: 1000; padding: 20px; }
         .modal-content { background: #1e293b; border: 3px solid #3b82f6; padding: 20px; border-radius: 12px; max-width: 400px; width: 100%; text-align: center; }
+        .modal h3 { margin-bottom: 15px; }
         .modal-btns { display: flex; gap: 10px; margin-top: 20px; }
         .btn-give { background: #10b981; }
         .btn-fish { background: #ef4444; }
+        .rules-list { font-size: 0.85rem; color: #cbd5e1; line-height: 1.4; padding-left: 20px; }
     </style>
 </head>
 <body>
@@ -82,8 +84,18 @@
 
             <hr style="margin:15px 0; border-color:#475569;">
 
-            <h3>Your Hand (Multiline Wrap)</h3>
+            <h3>Your Hand</h3>
             <div class="hand-flex" id="your-hand"></div>
+        </div>
+
+        <div class="section">
+            <h3>📜 Official Rules</h3>
+            <ul class="rules-list">
+                <li>Choose an opponent and ask them for a specific card rank (2 through Ace).</li>
+                <li>If the opponent has cards of that rank, they <strong>must</strong> give you exactly ONE.</li>
+                <li>If they do not have that rank, they will tell you to <strong>"Go Fish!"</strong> and you can draw a card manually from the deck.</li>
+                <li>When you collect all 4 suits of a single rank, hit the <strong>Fold Matches</strong> button to gain points. The highest score wins!</li>
+            </ul>
         </div>
     </div>
 

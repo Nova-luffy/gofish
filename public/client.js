@@ -11,7 +11,7 @@ socket.on('state_update', (state) => {
 
     currentHand = state.yourHand || [];
     
-    // Sort and render hand cards with dynamic CSS multiline wrapping active
+    // Render hand cards with responsive CSS multiline flexbox wrap tracking active
     const handDiv = document.getElementById('your-hand');
     handDiv.innerHTML = currentHand.map(c => {
         const isRed = c.suit === '♥' || c.suit === '♦';
@@ -31,12 +31,12 @@ socket.on('state_update', (state) => {
 
     document.getElementById('ask-btn').disabled = !state.isYourTurn;
 
-    // Render the dynamic Turn Completion History tracking elements
+    // Render dynamic turn completion text strings down into historical logs column box
     const historyBox = document.getElementById('history-log-box');
     historyBox.innerHTML = (state.log || []).map(line => `
         <div class="log-line">${line}</div>
     `).join('');
-    historyBox.scrollTop = historyBox.scrollHeight; // Auto-scrolls to the newest logs
+    historyBox.scrollTop = historyBox.scrollHeight;
 
     const oppList = document.getElementById('opponents-list');
     oppList.innerHTML = state.players
@@ -67,6 +67,7 @@ socket.on('card_requested', (data) => {
     
     const holdsCard = currentHand.some(card => card.rank === data.rank);
     
+    // Verification Protection: Disable Go Fish if they are lying and hold the card
     document.getElementById('modal-fish-btn').disabled = holdsCard;
     document.getElementById('modal-give-btn').disabled = !holdsCard;
     
