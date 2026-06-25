@@ -1,12 +1,14 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const path = require('path'); // Absolute path calculation utility module
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use(express.static('public'));
+// Fixed path flaw using absolute directory mapping variables
+app.use(express.static(path.join(__dirname, 'public')));
 
 let gameState = {
     players: [],        
@@ -108,36 +110,36 @@ io.on('connection', (socket) => {
         if (!currentPlayer || !targetPlayer) return;
 
         if (action === 'give') {
-            // Find the index of exactly ONE card matching the requested rank
             const cardIndex = targetPlayer.hand.findIndex(c => c.rank === rank);
-            
             if (cardIndex !== -1) {
-                // Remove only ONE card from opponent hand
                 const [transferredCard] = targetPlayer.hand.splice(cardIndex, 1);
-                
-                // Push that single card to the asking player's hand
                 currentPlayer.hand.push(transferredCard);
-                
                 addToLog(`🎯 ${currentPlayer.name} asked ${targetPlayer.name} for a ${rank} and took ONE.`);
             }
         } else if (action === 'fish') {
             addToLog(`🐟 ${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s. Go Fish!`);
-            gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
         }
 
         broadcastState();
     });
 
+    // Enforced Rule: Drawing a card from the deck pile ALWAYS switches the turn instantly
     socket.on('draw_from_deck', () => {
-        const currentPlayer = gameState.players.find(p => p.id === socket.id);
-        if (!currentPlayer || gameState.deck.length === 0) return;
+        const currentPlayer = gameState.players[gameState.currentTurnIndex];
+        
+        if (!currentPlayer || socket.id !== currentPlayer.id || gameState.deck.length === 0) return;
 
         const drawnCard = gameState.deck.pop();
         currentPlayer.hand.push(drawnCard);
         addToLog(`🃏 ${currentPlayer.name} drew a card from the deck.`);
+
+        // Pass active turn state down immediately
+        gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
+
         broadcastState();
     });
 
+    // Quiet Mode: Evaluates sets of 4 matching cards without writing log notifications
     socket.on('manual_fold_check', () => {
         const player = gameState.players.find(p => p.id === socket.id);
         if (!player) return;
@@ -151,8 +153,7 @@ io.on('connection', (socket) => {
         for (let rank in counts) {
             if (counts[rank] === 4) {
                 player.hand = player.hand.filter(card => card.rank !== rank);
-                player.folds += 1;
-                addToLog(`✨ ${player.name} laid down a matching Fold of ${rank}s!`);
+                player.folds += 1; 
                 foldedAny = true;
             }
         }
