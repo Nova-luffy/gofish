@@ -7,7 +7,10 @@ let activeRequest = null;
 let localStream = null;
 let peerConnections = {}; 
 const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19002' }] };
-let voiceMode = 'mute'; // Options: 'open', 'ptt', 'mute'
+
+// Voice Controller System Variances
+let voiceMode = 'open'; 
+let isPttActive = false; 
 
 socket.on('state_update', (state) => {
     myId = socket.id;
@@ -101,124 +104,117 @@ socket.on('card_requested', (data) => {
 
 socket.on('error_message', (msg) => { alert(msg); });
 
-// ==========================================
-// 🎙️ WebRTC Voice Modes & Control Systems
-// ==========================================
+// WebRTC Voice Infrastructure Setup Modules
+async function initiateVoiceChat() {
+    if (localStream) return;
 
-async function ensureAudioStream() {
-    if (!localStream) {
-        try {
-            localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-            // Default initialization sets mic to muted state
-            setLocalAudioTrackState(false);
-            socket.emit('voice_ready_handshake');
-        } catch (err) {
-            alert("Audio Microphone permission blocked or unsupported over unsecure connections!");
-            return false;
-        }
-    }
-    return true;
-}
-
-function setLocalAudioTrackState(enabled) {
-    if (localStream) {
-        localStream.getAudioTracks().forEach(track => {
-            track.enabled = enabled;
-        });
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        
+        document.getElementById('voice-toggle-btn').style.display = 'none';
+        document.getElementById('voice-management-actions').style.display = 'flex';
+        
+        setVoiceMode('open');
+        socket.emit('voice_ready_handshake');
+    } catch (err) {
+        alert("Audio Mic permission initialization blocked or unsupported over non-HTTPS!");
     }
 }
 
-async function setVoiceMode(mode) {
-    const streamActive = await ensureAudioStream();
-    if (!streamActive) return;
-
+function setVoiceMode(mode) {
     voiceMode = mode;
-    updateVoiceUI();
-
-    if (voiceMode === 'open') {
-        setLocalAudioTrackState(true);
-    } else {
-        // Both 'ptt' and 'mute' turn the audio track off until explicitly activated
-        setLocalAudioTrackState(false);
+    
+    const openBtn = document.getElementById('btn-mode-open');
+    const pttBtn = document.getElementById('btn-mode-ptt');
+    const pttArea = document.getElementById('ptt-trigger-area');
+    
+    if (mode === 'open') {
+        openBtn.style.background = '#10b981';
+        pttBtn.style.background = '#475569';
+        pttArea.style.display = 'none';
+        setLocalAudioMute(false);
+    } else if (mode === 'ptt') {
+        pttBtn.style.background = '#10b981';
+        openBtn.style.background = '#475569';
+        pttArea.style.display = 'block';
+        setLocalAudioMute(true);
     }
 }
 
-// Push To Talk Event Triggers
-async function startPTT() {
+function setLocalAudioMute(isMuted) {
+    if (localStream && localStream.getAudioTracks().length > 0) {
+        localStream.getAudioTracks()[0].enabled = !isMuted;
+    }
+}
+
+function pttHoldStart() {
     if (voiceMode !== 'ptt') return;
-    const streamActive = await ensureAudioStream();
-    if (streamActive) {
-        setLocalAudioTrackState(true);
-        document.getElementById('voice-status-indicator').innerText = "🎙️ PTT Broad Casting... (TALKING)";
-    }
+    isPttActive = true;
+    const pttBtn = document.getElementById('ptt-action-btn');
+    pttBtn.innerText = "🎙️ TRANSMITTING LIVE...";
+    pttBtn.style.background = '#10b981';
+    setLocalAudioMute(false);
 }
 
-function stopPTT() {
-    if (voiceMode !== 'ptt') return;
-    setLocalAudioTrackState(false);
-    document.getElementById('voice-status-indicator').innerText = "🎙️ PTT Engaged (Hold Space/Button to talk)";
+function pttHoldEnd() {
+    if (voiceMode !== 'ptt' || !isPttActive) return;
+    isPttActive = false;
+    const pttBtn = document.getElementById('ptt-action-btn');
+    pttBtn.innerText = "🛑 HOLD TO TALK (Muted)";
+    pttBtn.style.background = '#d97706';
+    setLocalAudioMute(true);
 }
 
-function updateVoiceUI() {
-    const statusBox = document.getElementById('voice-status-indicator');
-    if (!statusBox) return;
-
-    if (voiceMode === 'open') {
-        statusBox.innerText = "🔊 Open Mic: Live Speaking Room";
-        statusBox.style.color = "#22c55e";
-    } else if (voiceMode === 'ptt') {
-        statusBox.innerText = "🎙️ PTT Engaged (Hold Space/Button to talk)";
-        statusBox.style.color = "#eab308";
-    } else {
-        statusBox.innerText = "🔇 Voice Muted / Closed";
-        statusBox.style.color = "#ef4444";
+function closeVoiceChat() {
+    if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
     }
+
+    for (let targetId in peerConnections) {
+        peerConnections[targetId].close();
+        delete peerConnections[targetId];
+        
+        const audioEl = document.getElementById(`audio-${targetId}`);
+        if (audioEl) audioEl.remove();
+    }
+
+    document.getElementById('voice-management-actions').style.display = 'none';
+    document.getElementById('ptt-trigger-area').style.display = 'none';
+    
+    const btn = document.getElementById('voice-toggle-btn');
+    btn.style.display = 'block';
+    btn.innerText = "🎙️ Join Voice Chat Room";
+    btn.classList.remove('connected');
+    
+    alert("Voice Chat disconnected successfully!");
 }
-
-// Global Keybind listeners for Push-To-Talk via Spacebar
-window.addEventListener('keydown', (e) => {
-    // Prevent activation if typing in an input field
-    if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT') return;
-    if (e.code === 'Space') {
-        e.preventDefault(); 
-        startPTT();
-    }
-});
-
-window.addEventListener('keyup', (e) => {
-    if (e.code === 'Space') {
-        stopPTT();
-    }
-});
-
-// ==========================================
-// ⚡ WebRTC Mesh Signaling Mechanics
-// ==========================================
 
 socket.on('voice_user_joined', async (userId) => {
-    await ensureAudioStream();
+    if (!localStream) return;
     createPeerConnection(userId, true);
 });
 
 socket.on('voice_signal_received', async ({ senderId, signal }) => {
-    await ensureAudioStream();
+    if (!localStream) return;
+    
+    if (signal.candidate) {
+        if (peerConnections[senderId]) {
+            await peerConnections[senderId].addIceCandidate(new RTCIceCandidate(signal.candidate)).catch(e => {});
+        }
+        return;
+    }
+
     if (!peerConnections[senderId]) {
         createPeerConnection(senderId, false);
     }
-    await peerConnections[senderId].setRemoteDescription(new RTCSessionDescription(signal));
-    if (signal.type === 'offer') {
-        const answer = await peerConnections[senderId].createAnswer();
-        await peerConnections[senderId].setLocalDescription(answer);
-        socket.emit('voice_signal', { targetId: senderId, signal: answer });
-    }
-});
-
-socket.on('voice_ice_candidate', async ({ senderId, candidate }) => {
-    if (peerConnections[senderId] && candidate) {
-        try {
-            await peerConnections[senderId].addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) {
-            console.error("Error adding received ICE candidate", e);
+    
+    if (signal.sdp) {
+        await peerConnections[senderId].setRemoteDescription(new RTCSessionDescription(signal));
+        if (signal.type === 'offer') {
+            const answer = await peerConnections[senderId].createAnswer();
+            await peerConnections[senderId].setLocalDescription(answer);
+            socket.emit('voice_signal', { targetId: senderId, signal: answer });
         }
     }
 });
@@ -227,13 +223,11 @@ function createPeerConnection(targetId, isOffer) {
     const pc = new RTCPeerConnection(rtcConfig);
     peerConnections[targetId] = pc;
 
-    if (localStream) {
-        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-    }
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
     pc.onicecandidate = (event) => {
         if (event.candidate) {
-            socket.emit('voice_ice_candidate', { targetId, candidate: event.candidate });
+            socket.emit('voice_signal', { targetId, signal: { candidate: event.candidate } });
         }
     };
 
@@ -243,8 +237,7 @@ function createPeerConnection(targetId, isOffer) {
             audioEl = document.createElement('audio');
             audioEl.id = `audio-${targetId}`;
             audioEl.autoplay = true;
-            const container = document.getElementById('remote-audio-streams-container');
-            if (container) container.appendChild(audioEl);
+            document.getElementById('remote-audio-streams-container').appendChild(audioEl);
         }
         audioEl.srcObject = event.streams[0];
     };
@@ -256,17 +249,31 @@ function createPeerConnection(targetId, isOffer) {
                 await pc.setLocalDescription(offer);
                 socket.emit('voice_signal', { targetId, signal: offer });
             } catch (err) {
-                console.error(err);
+                console.error("Negotiation setup failed", err);
             }
         };
     }
 }
 
-// Socket Room Hooks
 function joinLobby() {
     const name = document.getElementById('username-input').value;
     if(name) { socket.emit('join_game', name); } else { alert("Please enter a nickname!"); }
 }
+
+// Global window layout listeners handling physical Spacebar events for PTT transitions
+window.addEventListener('keydown', (e) => {
+    if (voiceMode === 'ptt' && e.code === 'Space' && !isPttActive) {
+        e.preventDefault(); 
+        pttHoldStart();
+    }
+});
+
+window.addEventListener('keyup', (e) => {
+    if (voiceMode === 'ptt' && e.code === 'Space') {
+        e.preventDefault();
+        pttHoldEnd();
+    }
+});
 
 function submitAsk() {
     const targetId = document.getElementById('target-player-select').value;

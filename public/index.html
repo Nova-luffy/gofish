@@ -3,244 +3,140 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Go Fish & Live Voice Room</title>
+    <title>Go Fish Multi-Slayer</title>
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #0f172a;
-            color: #f8fafc;
-            margin: 0;
-            padding: 20px;
-        }
-        .container {
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-        /* Voice Panel Styling */
-        .voice-panel {
-            background-color: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
-        }
-        .voice-controls {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        .voice-status {
-            font-weight: bold;
-            color: #ef4444; /* Default Muted Red */
-        }
-        /* Layout Blocks */
-        .views-box {
-            background-color: #1e293b;
-            border-radius: 8px;
-            padding: 20px;
-            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
-        }
-        .game-grid {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 20px;
-            margin-top: 20px;
-        }
-        /* Cards & Components */
-        .card-hand {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin: 15px 0;
-            min-height: 110px;
-        }
-        .card {
-            background-color: #ffffff;
-            color: #000000;
-            width: 70px;
-            height: 100px;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.25rem;
-            font-weight: bold;
-            text-align: center;
-            border: 2px solid #cbd5e1;
-            user-select: none;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
+        body { background-color: #1e293b; color: #f8fafc; padding: 15px; display: flex; justify-content: center; }
+        .game-container { width: 100%; max-width: 800px; display: flex; flex-direction: column; gap: 15px; }
+        h1 { text-align: center; font-size: 1.5rem; margin-bottom: 5px; }
+        .section { background: #334155; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .opponents-grid { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 5px; }
+        .opponent-card { border: 2px solid #64748b; padding: 10px; border-radius: 6px; min-width: 120px; text-align: center; background: #1e293b; }
+        .active-turn { border-color: #10b981; background: #064e3b; }
+        
+        .hand-flex { display: flex; gap: 10px; flex-wrap: wrap; padding: 12px 0; justify-content: flex-start; }
+        .card { background: white; color: black; border-radius: 6px; padding: 12px 8px; font-weight: bold; font-size: 1.1rem; text-align: center; width: calc(25% - 8px); min-width: 65px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); border: 3px solid transparent; }
         .card.red { color: #dc2626; }
-        .quad-highlight { border: 3px solid #eab308; box-shadow: 0 0 10px #eab308; }
+        .card.quad-highlight { border-color: #22c55e !important; box-shadow: 0 0 12px #22c55e; background: #f0fdf4; }
+
+        .fold-badge { display: inline-block; background: #10b981; color: white; padding: 2px 5px; font-size: 0.75rem; border-radius: 4px; font-weight: bold; margin: 1px; }
+
+        .controls { display: flex; flex-direction: column; gap: 8px; }
+        select, button { padding: 11px; border-radius: 6px; border: none; font-size: 1rem; width: 100%; }
+        button { background: #3b82f6; color: white; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+        button:hover { background: #2563eb; }
+        button:disabled { background: #475569; cursor: not-allowed; opacity: 0.5; }
         
-        .opponent-card {
-            background: #1e293b;
-            border: 1px solid #475569;
-            border-radius: 6px;
-            padding: 10px;
-            margin-bottom: 10px;
-        }
-        .active-turn { border: 2px solid #22c55e; box-shadow: 0 0 8px #22c55e; }
+        .btn-deck { background: #d97706; }
+        .btn-deck:hover { background: #b45309; }
+        .btn-fold { background: #10b981; }
+        .btn-fold:hover { background: #047857; }
         
-        #history-log-box {
-            background-color: #020617;
-            border: 1px solid #334155;
-            height: 150px;
-            overflow-y: auto;
-            padding: 10px;
-            border-radius: 6px;
-            font-family: monospace;
-            font-size: 0.9rem;
-        }
-        .log-line { margin-bottom: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 2px; }
-        
-        /* Modal */
-        .modal-overlay {
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.8);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 999;
-        }
-        .modal-content {
-            background: #1e293b;
-            padding: 25px;
-            border-radius: 8px;
-            border: 1px solid #475569;
-            text-align: center;
-            max-width: 400px;
-            width: 100%;
-        }
-        .fold-badge {
-            background: #10b981;
-            color: white;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: bold;
-        }
-        /* Buttons */
-        button {
-            background-color: #3b82f6;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: 500;
-        }
-        button:hover { background-color: #2563eb; }
-        button:disabled { background-color: #475569; cursor: not-allowed; }
-        .btn-danger { background-color: #ef4444; }
-        .btn-danger:hover { background-color: #dc2626; }
-        .btn-warn { background-color: #eab308; color: #0f172a; }
-        .btn-warn:hover { background-color: #ca8a04; }
-        input, select {
-            background-color: #0f172a;
-            color: white;
-            border: 1px solid #475569;
-            padding: 8px;
-            border-radius: 4px;
-        }
+        .sys-btn-grid { display: flex; gap: 10px; margin-top: 5px; }
+        .btn-restart { background: #8b5cf6; }
+        .btn-restart:hover { background: #7c3aed; }
+        .btn-exit { background: #ef4444; }
+        .btn-exit:hover { background: #dc2626; }
+
+        .btn-voice { background: #0ea5e9; margin-bottom: 10px; }
+        .btn-voice.connected { background: #10b981; }
+
+        .log-box { background: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #475569; max-height: 120px; overflow-y: auto; font-size: 0.9rem; margin-top: 5px; }
+        .log-line { border-bottom: 1px solid #334155; padding: 4px 0; color: #cbd5e1; }
+        .log-line:last-child { border-bottom: none; }
+
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; z-index: 1000; padding: 20px; }
+        .modal-content { background: #1e293b; border: 3px solid #3b82f6; padding: 20px; border-radius: 12px; max-width: 400px; width: 100%; text-align: center; }
+        .modal-btns { display: flex; gap: 10px; margin-top: 20px; }
     </style>
 </head>
 <body>
+    <div class="game-container">
+        <h1>Go Fish Multi-Slayer</h1>
 
-<div class="container">
-    
-    <!-- 🎙️ WebRTC Voice Processing Infrastructure Controls Matrix -->
-    <div class="voice-panel">
-        <h3>🎙️ Proximity Game Audio Engine</h3>
-        <div>System Status: <span id="voice-status-indicator" class="voice-status">🔇 Voice Muted / Closed</span></div>
-        <div class="voice-controls">
-            <button onclick="setVoiceMode('open')">🔊 Open Mic</button>
-            <button class="btn-warn" 
-                    onmousedown="startPTT()" 
-                    onmouseup="stopPTT()" 
-                    onmouseleave="stopPTT()">
-                    🛑 Push to Talk (Hold Space or Click)
-            </button>
-            <button class="btn-danger" onclick="setVoiceMode('mute')">Mute Mic</button>
-        </div>
-        <!-- Target container for handling hidden media track handshakes natively -->
-        <div id="remote-audio-streams-container" style="display: none;"></div>
-    </div>
-
-    <div class="views-box">
-        <!-- LOBBY VIEW -->
-        <div id="lobby-view">
-            <h2>Welcome to Go Fish Lobby</h2>
-            <div style="margin-bottom: 15px;">
-                <label>Enter Nickname: </label>
-                <input type="text" id="username-input" placeholder="Your Name...">
-                <button onclick="joinLobby()">Join Room</button>
+        <div id="lobby-view" class="section">
+            <input type="text" id="username-input" placeholder="Enter Nickname" style="padding:10px; width:100%; border-radius:6px; margin-bottom:10px; color:black;">
+            <button onclick="joinLobby()">Join Lobby</button>
+            
+            <div id="waiting-room" style="background: #1e293b; padding: 10px; border-radius: 6px; margin-top: 10px; margin-bottom: 10px; border: 1px dashed #475569;">
+                <strong style="color: #cbd5e1; font-size: 0.9rem;">Players in Lobby:</strong>
+                <ul id="lobby-players-list" style="list-style: none; padding: 5px 0 0 0; color: #10b981; font-weight: bold;">
+                    <li>Waiting for players to connect...</li>
+                </ul>
             </div>
-            <h3>Connected Players:</h3>
-            <ul id="lobby-players-list">
-                <li>Waiting for players to connect...</li>
-            </ul>
-            <button onclick="socket.emit('start_game')" style="margin-top: 15px; background-color: #10b981;">🚀 Start Match</button>
+            <button onclick="socket.emit('start_game')" style="background:#10b981;">Start Game</button>
         </div>
 
-        <!-- GAMEPLAY VIEW -->
-        <div id="game-view" style="display: none;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <h2>Go Fish Main Arena</h2>
-                <div>
-                    <button class="btn-warn" onclick="triggerRestart()">🔄 Restart Match</button>
-                    <button class="btn-danger" onclick="triggerExit()">🚪 Leave Room</button>
+        <div id="game-view" class="section" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <h3>Active Match Board</h3>
+                <div class="sys-btn-grid">
+                    <button class="btn-restart" style="padding:6px 12px; font-size:0.85rem;" onclick="triggerRestart()">Restart Match</button>
+                    <button class="btn-exit" style="padding:6px 12px; font-size:0.85rem;" onclick="triggerExit()">Exit Room</button>
                 </div>
             </div>
 
-            <div class="game-grid">
-                <!-- Left Column: Interactive Hand & Actions -->
-                <div>
-                    <h3>Your Cards:</h3>
-                    <div id="your-hand" class="card-hand"></div>
-
-                    <div style="margin: 20px 0; padding: 15px; background: #0f172a; border-radius: 6px;">
-                        <h4>Make a Request:</h4>
-                        <label>Ask: </label>
-                        <select id="target-player-select"></select>
-                        <label>For: </label>
-                        <select id="target-rank-select"></select>
-                        <button id="ask-btn" onclick="submitAsk()">Send Query</button>
+            <div style="background: #1e293b; padding: 12px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #475569;">
+                <h4 style="margin-bottom: 8px; font-size: 0.9rem; color: #cbd5e1;">Voice Chat Controls</h4>
+                <div id="voice-mode-controls" style="display: flex; gap: 8px; flex-direction: column;">
+                    <button id="voice-toggle-btn" class="btn-voice" onclick="initiateVoiceChat()">🎙️ Connect Audio Hardware</button>
+                    
+                    <div id="voice-management-actions" style="display: none; gap: 8px;">
+                        <button id="btn-mode-open" onclick="setVoiceMode('open')" style="background: #475569;">🗣️ Open Talk</button>
+                        <button id="btn-mode-ptt" onclick="setVoiceMode('ptt')" style="background: #475569;">🔘 Push-to-Talk</button>
+                        <button id="btn-close-voice" onclick="closeVoiceChat()" style="background: #ef4444;">❌ Close Chat</button>
                     </div>
-
-                    <div style="display: flex; gap: 10px;">
-                        <button onclick="drawFromDeck()">🃏 Draw From Deck</button>
-                        <button class="btn-warn" onclick="triggerManualFold()">🎁 Fold 4-of-a-Kind Set</button>
+                    
+                    <div id="ptt-trigger-area" style="display: none; margin-top: 5px;">
+                        <button id="ptt-action-btn" style="background: #d97706; padding: 15px; font-size: 1.1rem;" 
+                                onmousedown="pttHoldStart()" onmouseup="pttHoldEnd()" 
+                                ontouchstart="pttHoldStart()" ontouchend="pttHoldEnd()">
+                            🛑 HOLD TO TALK (Muted)
+                        </button>
+                        <p style="font-size: 0.75rem; color: #94a3b8; text-align: center; margin-top: 4px;">Tip: You can also hold the [Spacebar] on your keyboard</p>
                     </div>
                 </div>
+            </div>
+            
+            <div class="opponents-grid" id="opponents-list"></div>
+            
+            <hr style="margin:15px 0; border-color:#475569;">
+            
+            <div class="controls">
+                <h3>Your Turn Actions</h3>
+                <label>Target Player:</label> <select id="target-player-select" style="color:black;"></select>
+                <label>Rank:</label> <select id="target-rank-select" style="color:black;"></select>
+                <button id="ask-btn" onclick="submitAsk()">Ask For Card</button>
+                
+                <button class="btn-deck" onclick="drawFromDeck()">Draw From Deck Pile</button>
+                <button class="btn-fold" onclick="triggerManualFold()">Check & Fold Matches (Auto-Select 4)</button>
+            </div>
 
-                <!-- Right Column: Room Logs & Player State Dashboard -->
-                <div>
-                    <h3>Opponents Dashboard:</h3>
-                    <div id="opponents-list"></div>
+            <hr style="margin:15px 0; border-color:#475569;">
 
-                    <h3>Activity Log:</h3>
-                    <div id="history-log-box"></div>
-                </div>
+            <h3>Turn Completion Logs</h3>
+            <div class="log-box" id="history-log-box"></div>
+
+            <hr style="margin:15px 0; border-color:#475569;">
+
+            <h3>Your Hand</h3>
+            <div class="hand-flex" id="your-hand"></div>
+        </div>
+    </div>
+
+    <div id="remote-audio-streams-container"></div>
+
+    <div id="request-modal" class="modal">
+        <div class="modal-content">
+            <h3 id="request-message">Player is asking you for a card!</h3>
+            <div class="modal-btns">
+                <button id="modal-give-btn" style="background:#10b981;" onclick="respondGive()">Give Card</button>
+                <button id="modal-fish-btn" style="background:#ef4444;" onclick="respondFish()">Go Fish</button>
             </div>
         </div>
     </div>
-</div>
 
-<!-- CARD INQUIRY MODAL (POPUP INTERACTION SYSTEM) -->
-<div class="modal-overlay" id="request-modal">
-    <div class="modal-content">
-        <h3>Incoming Card Request!</h3>
-        <p id="request-message">Player is asking you for cards...</p>
-        <div style="display: flex; justify-content: center; gap: 15px; margin-top: 20px;">
-            <button id="modal-give-btn" onclick="respondGive()" style="background-color: #10b981;">Give Card</button>
-            <button id="modal-fish-btn" class="btn-danger" onclick="respondFish()">Tell them: Go Fish! 🐟</button>
-        </div>
-    </div>
-</div>
-
-<!-- Script Infrastructure Hooks -->
-<script src="/socket.io/socket.io.js"></script>
-<script src="client.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="client.js"></script>
 </body>
 </html>

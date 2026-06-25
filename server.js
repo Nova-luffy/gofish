@@ -95,11 +95,6 @@ io.on('connection', (socket) => {
         io.emit('room_update', gameState.players.map(p => p.name));
     });
 
-    socket.on('voice_ready_handshake', () => {
-        // Trigger other users to begin handshaking now that this individual's mic is active
-        socket.broadcast.emit('voice_user_joined', socket.id);
-    });
-
     socket.on('start_game', () => {
         if (gameState.players.length < 2) {
             socket.emit('error_message', "Need at least 2 players to start.");
@@ -128,7 +123,10 @@ io.on('connection', (socket) => {
         io.emit('room_update', []);
     });
 
-    // 🎙️ WebRTC Voice SDP Relay Matrix
+    socket.on('voice_ready_handshake', () => {
+        socket.broadcast.emit('voice_user_joined', socket.id);
+    });
+
     socket.on('voice_signal', ({ targetId, signal }) => {
         io.to(targetId).emit('voice_signal_received', {
             senderId: socket.id,
@@ -136,17 +134,9 @@ io.on('connection', (socket) => {
         });
     });
 
-    // 🎙️ WebRTC Network ICE Candidate Relay
-    socket.on('voice_ice_candidate', ({ targetId, candidate }) => {
-        io.to(targetId).emit('voice_ice_candidate', {
-            senderId: socket.id,
-            candidate: candidate
-        });
-    });
-
     socket.on('ask_card', ({ targetId, rank }) => {
         const currentPlayer = gameState.players[gameState.currentTurnIndex];
-        if (socket.id !== currentPlayer.id) return;
+        if (!currentPlayer || socket.id !== currentPlayer.id) return;
 
         const targetPlayer = gameState.players.find(p => p.id === targetId);
         if (!targetPlayer) return;
@@ -166,12 +156,11 @@ io.on('connection', (socket) => {
         if (!currentPlayer || !targetPlayer) return;
 
         if (action === 'give') {
-            const cardIndex = targetPlayer.hand.findIndex(c => c.rank === rank);
-            if (cardIndex !== -1) {
-                const [transferredCard] = targetPlayer.hand.splice(cardIndex, 1);
-                currentPlayer.hand.push(transferredCard);
-                addToLog(`🎯 ${currentPlayer.name} asked ${targetPlayer.name} for a ${rank} and took ONE.`);
-            }
+            const matchingCards = targetPlayer.hand.filter(c => c.rank === rank);
+            targetPlayer.hand = targetPlayer.hand.filter(c => c.rank !== rank);
+            currentPlayer.hand.push(...matchingCards);
+            
+            addToLog(`🎯 ${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s and took ${matchingCards.length} card(s).`);
         } else if (action === 'fish') {
             addToLog(`🐟 ${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s. Go Fish!`);
         }
@@ -213,6 +202,8 @@ io.on('connection', (socket) => {
 
         if (!foldedAny) {
             socket.emit('error_message', "No 4-of-a-kind sets found in your hand to fold!");
+        } else {
+            addToLog(`🎁 ${player.name} folded a complete set of 4-of-a-kind!`);
         }
 
         broadcastState();
@@ -220,7 +211,11 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         gameState.players = gameState.players.filter(p => p.id !== socket.id);
-        if(gameState.players.length === 0) gameState.gameStarted = false;
+        if(gameState.players.length === 0) {
+            gameState.gameStarted = false;
+        } else {
+            gameState.currentTurnIndex = gameState.currentTurnIndex % gameState.players.length;
+        }
         io.emit('room_update', gameState.players.map(p => p.name));
         broadcastState();
     });
