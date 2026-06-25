@@ -129,9 +129,11 @@ socket.on('state_update', (state) => {
     // --- TURN CONTROL ENGINE ---
     document.getElementById('ask-btn').disabled = !state.isYourTurn;
     
+    // Allow clicking the deck pile if it is your standard turn, OR if the server demands a fish draw
     const canClickDeck = state.isYourTurn || state.awaitingFishDraw;
     document.getElementById('deck-draw-click-trigger').style.pointerEvents = canClickDeck ? 'auto' : 'none';
     
+    // Add visual glowing indicators to the deck layout when a draw is forced
     const deckWrapperElement = document.getElementById('deck-draw-click-trigger');
     if (state.awaitingFishDraw) {
         deckWrapperElement.style.outline = "3px solid #10b981";
@@ -192,15 +194,7 @@ socket.on('error_message', (msg) => { alert(msg); });
 function joinLobby() {
     initAudio();
     const name = document.getElementById('username-input').value;
-    const roomInput = document.getElementById('room-input');
-    const roomName = roomInput ? roomInput.value : "default_arena";
-    
-    if(name.trim()) {
-        socket.emit('join_game', {
-            name: name.trim(),
-            room: roomName.trim()
-        });
-    }
+    if(name.trim()) socket.emit('join_game', name.trim());
 }
 function sendChatMessage() {
     const input = document.getElementById('chat-input');
