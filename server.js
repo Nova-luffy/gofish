@@ -14,7 +14,8 @@ let gameState = {
     deck: [],
     currentTurnIndex: 0,
     gameStarted: false,
-    log: []
+    log: [],
+    chat: [] // Tracks universal chat messages
 };
 
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
@@ -46,7 +47,7 @@ function addToLog(message) {
 function resetGameStructure() {
     gameState.deck = createAndShuffleDeck();
     gameState.players.forEach(p => {
-        p.hand = gameState.deck.splice(0, 4); // Changed to 4 cards per player
+        p.hand = gameState.deck.splice(0, 4); // Deals exactly 4 cards per player
         p.folds = 0;
         p.foldedRanks = [];
     });
@@ -69,6 +70,7 @@ function broadcastState() {
             players: maskedPlayers,
             deckCount: gameState.deck.length,
             log: gameState.log.map(entry => entry.text),
+            chat: gameState.chat, // Send full chat history
             isYourTurn: idx === gameState.currentTurnIndex,
             gameStarted: gameState.gameStarted
         });
@@ -106,13 +108,22 @@ io.on('connection', (socket) => {
     });
 
     socket.on('leave_game', () => {
-        // Reset the game for everyone and return to lobby
         gameState.players = [];
         gameState.deck = [];
         gameState.gameStarted = false;
         gameState.log = [];
+        gameState.chat = [];
         io.emit('global_logout_forced');
         io.emit('room_update', []);
+    });
+
+    socket.on('send_chat', (message) => {
+        const player = gameState.players.find(p => p.id === socket.id);
+        if (player) {
+            gameState.chat.push(`${player.name}: ${message}`);
+            if (gameState.chat.length > 40) gameState.chat.shift(); // Keep logs clean
+            broadcastState();
+        }
     });
 
     socket.on('ask_card', ({ targetId, rank }) => {
@@ -131,7 +142,7 @@ io.on('connection', (socket) => {
             if (cardIndex !== -1) {
                 const [transferredCard] = targetPlayer.hand.splice(cardIndex, 1);
                 currentPlayer.hand.push(transferredCard);
-                addToLog(`🎯 ${currentPlayer.name} took a ${rank} from ${targetPlayer.name}.`);
+                addToLog(`🎯 ${currentPlayer.name} took a card from ${targetPlayer.name}.`);
             }
         } else {
             addToLog(`🐟 ${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s. Go Fish!`);
@@ -152,13 +163,22 @@ io.on('connection', (socket) => {
         if (!player) return;
         const counts = {};
         player.hand.forEach(c => counts[c.rank] = (counts[c.rank] || 0) + 1);
+        
+        let foldedAny = false;
         for (let rank in counts) {
             if (counts[rank] === 4) {
                 player.hand = player.hand.filter(c => c.rank !== rank);
                 player.folds += 1;
                 player.foldedRanks.push(rank);
-                addToLog(`✅ ${player.name} folded a set of ${rank}s!`);
+                foldedAny = true;
             }
+        }
+
+        if (foldedAny) {
+            // Log message to other players without showing the rank
+            addToLog(`✅ ${player.name} successfully folded a set!`);
+        } else {
+            socket.emit('error_message', "No 4-of-a-kind sets found to fold.");
         }
         broadcastState();
     });

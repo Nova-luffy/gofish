@@ -14,8 +14,11 @@
         .opponent-card { border: 2px solid #64748b; padding: 10px; border-radius: 6px; min-width: 120px; text-align: center; background: #1e293b; }
         .active-turn { border-color: #10b981; background: #064e3b; }
         
-        .hand-flex { display: flex; gap: 10px; flex-wrap: wrap; padding: 12px 0; justify-content: flex-start; }
-        .card { background: white; color: black; border-radius: 6px; padding: 12px 8px; font-weight: bold; font-size: 1.1rem; text-align: center; width: calc(25% - 8px); min-width: 65px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); border: 3px solid transparent; }
+        .hand-flex { display: flex; gap: 15px; flex-wrap: wrap; padding: 12px 0; justify-content: flex-start; align-items: flex-start; }
+        
+        /* Layout classes for columns grouping same rank cards */
+        .card-column { display: flex; flex-direction: column; gap: 6px; min-width: 70px; }
+        .card { background: white; color: black; border-radius: 6px; padding: 12px 8px; font-weight: bold; font-size: 1.1rem; text-align: center; width: 100%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); border: 3px solid transparent; }
         .card.red { color: #dc2626; }
         .card.quad-highlight { border-color: #22c55e !important; box-shadow: 0 0 12px #22c55e; background: #f0fdf4; }
 
@@ -37,9 +40,6 @@
         .btn-restart:hover { background: #7c3aed; }
         .btn-exit { background: #ef4444; }
         .btn-exit:hover { background: #dc2626; }
-
-        .btn-voice { background: #0ea5e9; margin-bottom: 10px; }
-        .btn-voice.connected { background: #10b981; }
 
         .log-box { background: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #475569; max-height: 120px; overflow-y: auto; font-size: 0.9rem; margin-top: 5px; }
         .log-line { border-bottom: 1px solid #334155; padding: 4px 0; color: #cbd5e1; }
@@ -75,28 +75,6 @@
                     <button class="btn-exit" style="padding:6px 12px; font-size:0.85rem;" onclick="triggerExit()">Exit Room</button>
                 </div>
             </div>
-
-            <div style="background: #1e293b; padding: 12px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #475569;">
-                <h4 style="margin-bottom: 8px; font-size: 0.9rem; color: #cbd5e1;">Voice Chat Controls</h4>
-                <div id="voice-mode-controls" style="display: flex; gap: 8px; flex-direction: column;">
-                    <button id="voice-toggle-btn" class="btn-voice" onclick="initiateVoiceChat()">🎙️ Connect Audio Hardware</button>
-                    
-                    <div id="voice-management-actions" style="display: none; gap: 8px;">
-                        <button id="btn-mode-open" onclick="setVoiceMode('open')" style="background: #475569;">🗣️ Open Talk</button>
-                        <button id="btn-mode-ptt" onclick="setVoiceMode('ptt')" style="background: #475569;">🔘 Push-to-Talk</button>
-                        <button id="btn-close-voice" onclick="closeVoiceChat()" style="background: #ef4444;">❌ Close Chat</button>
-                    </div>
-                    
-                    <div id="ptt-trigger-area" style="display: none; margin-top: 5px;">
-                        <button id="ptt-action-btn" style="background: #d97706; padding: 15px; font-size: 1.1rem;" 
-                                onmousedown="pttHoldStart()" onmouseup="pttHoldEnd()" 
-                                ontouchstart="pttHoldStart()" ontouchend="pttHoldEnd()">
-                            🛑 HOLD TO TALK (Muted)
-                        </button>
-                        <p style="font-size: 0.75rem; color: #94a3b8; text-align: center; margin-top: 4px;">Tip: You can also hold the [Spacebar] on your keyboard</p>
-                    </div>
-                </div>
-            </div>
             
             <div class="opponents-grid" id="opponents-list"></div>
             
@@ -114,6 +92,15 @@
 
             <hr style="margin:15px 0; border-color:#475569;">
 
+            <h3>Game Chat</h3>
+            <div class="log-box" id="chat-box" style="height: 110px;"></div>
+            <div style="display: flex; gap: 6px; margin-top: 6px;">
+                <input type="text" id="chat-input" placeholder="Type room message..." style="padding: 10px; border-radius: 6px; width: 100%; color: black; border: none;">
+                <button onclick="sendChatMessage()" style="width: auto; padding: 0 20px;">Send</button>
+            </div>
+
+            <hr style="margin:15px 0; border-color:#475569;">
+
             <h3>Turn Completion Logs</h3>
             <div class="log-box" id="history-log-box"></div>
 
@@ -123,8 +110,6 @@
             <div class="hand-flex" id="your-hand"></div>
         </div>
     </div>
-
-    <div id="remote-audio-streams-container"></div>
 
     <div id="request-modal" class="modal">
         <div class="modal-content">

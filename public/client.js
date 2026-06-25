@@ -20,11 +20,25 @@ socket.on('state_update', (state) => {
     const rankCounts = {};
     currentHand.forEach(c => { rankCounts[c.rank] = (rankCounts[c.rank] || 0) + 1; });
 
+    // Grouping hand items into arrays mapped by their rank
+    const groupedHand = {};
+    currentHand.forEach(c => {
+        if (!groupedHand[c.rank]) {
+            groupedHand[c.rank] = [];
+        }
+        groupedHand[c.rank].push(c);
+    });
+
+    // Stacking cards of the same rank/number into the same visual column
     const handDiv = document.getElementById('your-hand');
-    handDiv.innerHTML = currentHand.map(c => {
-        const isRed = c.suit === '♥' || c.suit === '♦';
-        const isQuad = rankCounts[c.rank] === 4;
-        return `<div class="card ${isRed ? 'red' : ''} ${isQuad ? 'quad-highlight' : ''}">${c.rank}<br>${c.suit}</div>`;
+    handDiv.innerHTML = Object.keys(groupedHand).map(rank => {
+        const cardsHTML = groupedHand[rank].map(c => {
+            const isRed = c.suit === '♥' || c.suit === '♦';
+            const isQuad = rankCounts[c.rank] === 4;
+            return `<div class="card ${isRed ? 'red' : ''} ${isQuad ? 'quad-highlight' : ''}">${c.rank}<br>${c.suit}</div>`;
+        }).join('');
+        
+        return `<div class="card-column">${cardsHTML}</div>`;
     }).join('');
 
     const oppSelect = document.getElementById('target-player-select');
@@ -44,11 +58,17 @@ socket.on('state_update', (state) => {
     historyBox.innerHTML = (state.log || []).map(line => `<div class="log-line">${line}</div>`).join('');
     historyBox.scrollTop = historyBox.scrollHeight;
 
+    // Renders Chat messages seamlessly inside the chatbox element
+    const chatBox = document.getElementById('chat-box');
+    chatBox.innerHTML = (state.chat || []).map(msg => `<div class="log-line">💬 ${msg}</div>`).join('');
+    chatBox.scrollTop = chatBox.scrollHeight;
+
     const oppList = document.getElementById('opponents-list');
     oppList.innerHTML = state.players
         .map(p => {
             const isMe = p.id === myId;
-            const foldBadgesHTML = (p.foldedRanks || []).map(r => `<span class="fold-badge">🎁 ${r}</span>`).join(' ');
+            // Mask the folded card details on opponent cards so they appear anonymous
+            const foldBadgesHTML = (p.foldedRanks || []).map(r => `<span class="fold-badge">🎁 ${isMe ? r : 'Hidden'}</span>`).join(' ');
 
             return `
                 <div class="opponent-card ${p.isCurrentTurn ? 'active-turn' : ''}" style="${isMe ? 'border-style: dashed; background:#334155;' : ''}">
@@ -118,3 +138,22 @@ function respondFish() {
     socket.emit('resolve_request', { ...activeRequest, action: 'fish' });
     document.getElementById('request-modal').style.display = 'none';
 }
+
+function sendChatMessage() {
+    const chatInput = document.getElementById('chat-input');
+    const msg = chatInput.value.trim();
+    if (msg) {
+        socket.emit('send_chat', msg);
+        chatInput.value = '';
+    }
+}
+
+// Add enter key handler directly to chat box input element
+document.addEventListener('DOMContentLoaded', () => {
+    const chatInput = document.getElementById('chat-input');
+    if (chatInput) {
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendChatMessage();
+        });
+    }
+});
