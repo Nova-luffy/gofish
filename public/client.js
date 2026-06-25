@@ -3,19 +3,33 @@ let myId = null;
 let currentHand = [];
 let activeRequest = null;
 
+// Voice Chat Infrastructure Variables
+let localStream = null;
+let peerConnections = {}; 
+const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19002' }] };
+
 socket.on('state_update', (state) => {
     myId = socket.id;
     
+    if(!state.gameStarted) {
+        document.getElementById('lobby-view').style.display = 'block';
+        document.getElementById('game-view').style.display = 'none';
+        return;
+    }
+
     document.getElementById('lobby-view').style.display = 'none';
     document.getElementById('game-view').style.display = 'block';
 
     currentHand = state.yourHand || [];
     
-    // Render hand cards
+    const rankCounts = {};
+    currentHand.forEach(c => { rankCounts[c.rank] = (rankCounts[c.rank] || 0) + 1; });
+
     const handDiv = document.getElementById('your-hand');
     handDiv.innerHTML = currentHand.map(c => {
         const isRed = c.suit === '♥' || c.suit === '♦';
-        return `<div class="card ${isRed ? 'red' : ''}">${c.rank}<br>${c.suit}</div>`;
+        const isQuad = rankCounts[c.rank] === 4;
+        return `<div class="card ${isRed ? 'red' : ''} ${isQuad ? 'quad-highlight' : ''}">${c.rank}<br>${c.suit}</div>`;
     }).join('');
 
     const oppSelect = document.getElementById('target-player-select');
@@ -31,45 +45,27 @@ socket.on('state_update', (state) => {
 
     document.getElementById('ask-btn').disabled = !state.isYourTurn;
 
-    // ⏱️ UPDATED: Render the log lines and set up individual 10-second self-destruct timers
-    // Render the logs exactly as the server maintains them
     const historyBox = document.getElementById('history-log-box');
-    historyBox.innerHTML = (state.log || []).map(line => `
-        <div class="log-line">${line}</div>
-    `).join('');
-    historyBox.scrollTop = historyBox.scrollHeight;
-
-    (state.log || []).forEach((line, index) => {
-        // Create a unique container for this specific log line
-        const logLineElement = document.createElement('div');
-        logLineElement.className = 'log-line';
-        logLineElement.innerText = line;
-        historyBox.appendChild(logLineElement);
-
-        // Start a 10-second (10000ms) countdown to fade out and delete this specific line
-        setTimeout(() => {
-            logLineElement.style.transition = 'opacity 0.5s ease';
-            logLineElement.style.opacity = '0';
-            setTimeout(() => {
-                if (logLineElement.parentNode === historyBox) {
-                    historyBox.removeChild(logLineElement);
-                }
-            }, 500); // Wait for fade-out animation to complete before removing from DOM
-        }, 10000);
-    });
-    
+    historyBox.innerHTML = (state.log || []).map(line => `<div class="log-line">${line}</div>`).join('');
     historyBox.scrollTop = historyBox.scrollHeight;
 
     const oppList = document.getElementById('opponents-list');
     oppList.innerHTML = state.players
-        .filter(p => p.id !== myId)
-        .map(p => `
-            <div class="opponent-card ${p.isCurrentTurn ? 'active-turn' : ''}">
-                <strong>${p.name}</strong><br>
-                Cards: ${p.cardCount}<br>
-                Folds: ${p.folds || 0}
-            </div>
-        `).join('');
+        .map(p => {
+            const isMe = p.id === myId;
+            const foldBadgesHTML = (p.foldedRanks || []).map(r => `<span class="fold-badge">🎁 ${r}</span>`).join(' ');
+
+            return `
+                <div class="opponent-card ${p.isCurrentTurn ? 'active-turn' : ''}" style="${isMe ? 'border-style: dashed; background:#334155;' : ''}">
+                    <strong>${p.name} ${isMe ? '(You)' : ''}</strong><br>
+                    Cards: ${p.cardCount}<br>
+                    Folds Count: ${p.folds || 0}
+                    <div style="margin-top: 5px; min-height:20px;">
+                        ${foldBadgesHTML || '<span style="font-size:0.75rem; color:#94a3b8;">No folds yet</span>'}
+                    </div>
+                </div>
+            `;
+        }).join('');
 });
 
 socket.on('room_update', (namesArray) => {
@@ -81,6 +77,16 @@ socket.on('room_update', (namesArray) => {
     }
 });
 
+// 🚪 GLOBAL LOGOUT BROADCAST ROUTING HANDLE
+socket.on('global_logout_forced', () => {
+    // Shutdown local audio hardware tracks safely
+    if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+    }
+    alert("An active member hit Exit! The session has been wiped and returned to Lobby.");
+    location.reload(); 
+});
+
 socket.on('card_requested', (data) => {
     if (data.targetId !== socket.id) return;
     
@@ -88,24 +94,84 @@ socket.on('card_requested', (data) => {
     document.getElementById('request-message').innerText = `${data.askerName} is asking you for: ${data.rank}'s`;
     
     const holdsCard = currentHand.some(card => card.rank === data.rank);
-    
     document.getElementById('modal-fish-btn').disabled = holdsCard;
     document.getElementById('modal-give-btn').disabled = !holdsCard;
     
     document.getElementById('request-modal').style.display = 'flex';
 });
 
-socket.on('error_message', (msg) => {
-    alert(msg);
+socket.on('error_message', (msg) => { alert(msg); });
+
+// 🎙️ WebRTC Voice Processing Infrastructure Mechanics Engine Handles
+async function initiateVoiceChat() {
+    if (localStream) return; // Prevent double connection instances
+
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        const btn = document.getElementById('voice-toggle-btn');
+        btn.innerText = "🎙️ Voice Chat Connected Live";
+        btn.classList.add('connected');
+
+        // Request signaling handshakes with all connected session nodes
+        socket.emit('voice_ready_handshake');
+    } catch (err) {
+        alert("Audio Mic permission initialization blocked or unsupported over non-HTTPS!");
+    }
+}
+
+socket.on('voice_user_joined', async (userId) => {
+    if (!localStream) return;
+    createPeerConnection(userId, true);
 });
+
+socket.on('voice_signal_received', async ({ senderId, signal }) => {
+    if (!localStream) return;
+    if (!peerConnections[senderId]) {
+        createPeerConnection(senderId, false);
+    }
+    await peerConnections[senderId].setRemoteDescription(new RTCSessionDescription(signal));
+    if (signal.type === 'offer') {
+        const answer = await peerConnections[senderId].createAnswer();
+        await peerConnections[senderId].setLocalDescription(answer);
+        socket.emit('voice_signal', { targetId: senderId, signal: answer });
+    }
+});
+
+function createPeerConnection(targetId, isOffer) {
+    const pc = new RTCPeerConnection(rtcConfig);
+    peerConnections[targetId] = pc;
+
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+    pc.onicecandidate = (event) => {
+        if (event.candidate) {
+            // Wait for gathering to stabilize or transfer via offer parameters natively
+        }
+    };
+
+    pc.ontrack = (event) => {
+        let audioEl = document.getElementById(`audio-${targetId}`);
+        if (!audioEl) {
+            audioEl = document.createElement('audio');
+            audioEl.id = `audio-${targetId}`;
+            audioEl.autoplay = true;
+            document.getElementById('remote-audio-streams-container').appendChild(audioEl);
+        }
+        audioEl.srcObject = event.streams[0];
+    };
+
+    if (isOffer) {
+        pc.onnegotiationneeded = async () => {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            socket.emit('voice_signal', { targetId, signal: offer });
+        };
+    }
+}
 
 function joinLobby() {
     const name = document.getElementById('username-input').value;
-    if(name) {
-        socket.emit('join_game', name);
-    } else {
-        alert("Please enter a nickname!");
-    }
+    if(name) { socket.emit('join_game', name); } else { alert("Please enter a nickname!"); }
 }
 
 function submitAsk() {
@@ -115,13 +181,10 @@ function submitAsk() {
     socket.emit('ask_card', { targetId, rank });
 }
 
-function drawFromDeck() {
-    socket.emit('draw_from_deck');
-}
-
-function triggerManualFold() {
-    socket.emit('manual_fold_check');
-}
+function drawFromDeck() { socket.emit('draw_from_deck'); }
+function triggerManualFold() { socket.emit('manual_fold_check'); }
+function triggerRestart() { socket.emit('restart_match'); }
+function triggerExit() { socket.emit('leave_game'); }
 
 function respondGive() {
     socket.emit('resolve_request', { ...activeRequest, action: 'give' });

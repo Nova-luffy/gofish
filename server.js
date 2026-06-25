@@ -14,7 +14,7 @@ let gameState = {
     deck: [],           
     currentTurnIndex: 0,
     gameStarted: false,
-    log: [] // Holds active logs that haven't expired yet
+    log: []
 };
 
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
@@ -34,16 +34,24 @@ function createAndShuffleDeck() {
     return deck;
 }
 
-// ⏱️ UPDATED: Adds a log entry and sets a backend timer to erase it after 10 seconds
 function addToLog(message) {
     const logEntry = { id: Date.now() + Math.random(), text: message };
     gameState.log.push(logEntry);
 
-    // After exactly 10 seconds (10000ms), remove this specific message from the server memory
     setTimeout(() => {
         gameState.log = gameState.log.filter(entry => entry.id !== logEntry.id);
-        broadcastState(); // Tell all clients to update their screen without this expired message
+        broadcastState();
     }, 10000);
+}
+
+function resetGameStructure() {
+    gameState.deck = createAndShuffleDeck();
+    gameState.players.forEach(p => {
+        p.hand = gameState.deck.splice(0, 5); 
+        p.folds = 0;
+        p.foldedRanks = [];
+    });
+    gameState.currentTurnIndex = 0;
 }
 
 function broadcastState() {
@@ -53,16 +61,17 @@ function broadcastState() {
             name: otherPlayer.name,
             cardCount: otherPlayer.hand.length,
             folds: otherPlayer.folds,
+            foldedRanks: otherPlayer.foldedRanks || [],
             isCurrentTurn: oIdx === gameState.currentTurnIndex
         }));
 
-        // Send only the text of the unexpired logs to the client
         io.to(p.id).emit('state_update', {
             yourHand: p.hand,
             players: maskedPlayers,
             deckCount: gameState.deck.length,
             log: gameState.log.map(entry => entry.text), 
-            isYourTurn: idx === gameState.currentTurnIndex
+            isYourTurn: idx === gameState.currentTurnIndex,
+            gameStarted: gameState.gameStarted
         });
     });
 }
@@ -75,9 +84,18 @@ io.on('connection', (socket) => {
             socket.emit('error_message', "Game full or already started.");
             return;
         }
-        gameState.players.push({ id: socket.id, name: actualName || `Player ${gameState.players.length + 1}`, hand: [], folds: 0 });
+        gameState.players.push({ 
+            id: socket.id, 
+            name: actualName || `Player ${gameState.players.length + 1}`, 
+            hand: [], 
+            folds: 0,
+            foldedRanks: [] 
+        });
         addToLog(`${actualName || socket.id} joined the room.`);
         io.emit('room_update', gameState.players.map(p => p.name));
+        
+        // Notify existing voice members to handshake with this new user
+        socket.broadcast.emit('voice_user_joined', socket.id);
     });
 
     socket.on('start_game', () => {
@@ -85,14 +103,36 @@ io.on('connection', (socket) => {
             socket.emit('error_message', "Need at least 2 players to start.");
             return;
         }
-        gameState.deck = createAndShuffleDeck();
-        gameState.players.forEach(p => {
-            p.hand = gameState.deck.splice(0, 5); 
-        });
         gameState.gameStarted = true;
-        gameState.currentTurnIndex = 0;
+        resetGameStructure();
         addToLog("The game has begun!");
         broadcastState();
+    });
+
+    socket.on('restart_match', () => {
+        if (!gameState.gameStarted) return;
+        resetGameStructure();
+        addToLog("🔄 The match was restarted by a player!");
+        broadcastState();
+    });
+
+    // 🚪 1. GLOBAL EXIT RULE: Kicks everyone back to the lobby page instantly on execution
+    socket.on('leave_game', () => {
+        gameState.players = [];
+        gameState.deck = [];
+        gameState.gameStarted = false;
+        gameState.log = [];
+        
+        io.emit('global_logout_forced'); 
+        io.emit('room_update', []);
+    });
+
+    // 🎙️ 2. WebRTC Audio Signaling Relay Engine Mesh 
+    socket.on('voice_signal', ({ targetId, signal }) => {
+        io.to(targetId).emit('voice_signal_received', {
+            senderId: socket.id,
+            signal: signal
+        });
     });
 
     socket.on('ask_card', ({ targetId, rank }) => {
@@ -132,7 +172,6 @@ io.on('connection', (socket) => {
 
     socket.on('draw_from_deck', () => {
         const currentPlayer = gameState.players[gameState.currentTurnIndex];
-        
         if (!currentPlayer || socket.id !== currentPlayer.id || gameState.deck.length === 0) return;
 
         const drawnCard = gameState.deck.pop();
@@ -140,7 +179,6 @@ io.on('connection', (socket) => {
         addToLog(`🃏 ${currentPlayer.name} drew a card from the deck.`);
 
         gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
-
         broadcastState();
     });
 
@@ -158,6 +196,8 @@ io.on('connection', (socket) => {
             if (counts[rank] === 4) {
                 player.hand = player.hand.filter(card => card.rank !== rank);
                 player.folds += 1; 
+                if (!player.foldedRanks) player.foldedRanks = [];
+                player.foldedRanks.push(rank);
                 foldedAny = true;
             }
         }
@@ -173,6 +213,7 @@ io.on('connection', (socket) => {
         gameState.players = gameState.players.filter(p => p.id !== socket.id);
         if(gameState.players.length === 0) gameState.gameStarted = false;
         io.emit('room_update', gameState.players.map(p => p.name));
+        broadcastState();
     });
 });
 

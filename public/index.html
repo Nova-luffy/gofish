@@ -11,14 +11,16 @@
         h1 { text-align: center; font-size: 1.5rem; margin-bottom: 5px; }
         .section { background: #334155; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         .opponents-grid { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 5px; }
-        .opponent-card { border: 2px solid #64748b; padding: 10px; border-radius: 6px; min-width: 110px; text-align: center; background: #1e293b; }
+        .opponent-card { border: 2px solid #64748b; padding: 10px; border-radius: 6px; min-width: 120px; text-align: center; background: #1e293b; }
         .active-turn { border-color: #10b981; background: #064e3b; }
         
-        /* Dynamic Multiline Hand wrapping display box grid */
         .hand-flex { display: flex; gap: 10px; flex-wrap: wrap; padding: 12px 0; justify-content: flex-start; }
-        .card { background: white; color: black; border-radius: 6px; padding: 12px 8px; font-weight: bold; font-size: 1.1rem; text-align: center; width: calc(25% - 8px); min-width: 65px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        .card { background: white; color: black; border-radius: 6px; padding: 12px 8px; font-weight: bold; font-size: 1.1rem; text-align: center; width: calc(25% - 8px); min-width: 65px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); border: 3px solid transparent; }
         .card.red { color: #dc2626; }
-        
+        .card.quad-highlight { border-color: #22c55e !important; box-shadow: 0 0 12px #22c55e; background: #f0fdf4; }
+
+        .fold-badge { display: inline-block; background: #10b981; color: white; padding: 2px 5px; font-size: 0.75rem; border-radius: 4px; font-weight: bold; margin: 1px; }
+
         .controls { display: flex; flex-direction: column; gap: 8px; }
         select, button { padding: 11px; border-radius: 6px; border: none; font-size: 1rem; width: 100%; }
         button { background: #3b82f6; color: white; font-weight: bold; cursor: pointer; transition: background 0.2s; }
@@ -29,19 +31,24 @@
         .btn-deck:hover { background: #b45309; }
         .btn-fold { background: #10b981; }
         .btn-fold:hover { background: #047857; }
+        
+        .sys-btn-grid { display: flex; gap: 10px; margin-top: 5px; }
+        .btn-restart { background: #8b5cf6; }
+        .btn-restart:hover { background: #7c3aed; }
+        .btn-exit { background: #ef4444; }
+        .btn-exit:hover { background: #dc2626; }
 
-        /* Log tracker display panel container layout */
-        .log-box { background: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #475569; max-height: 150px; overflow-y: auto; font-size: 0.9rem; margin-top: 5px; }
+        /* Voice Chat Configuration Button Rules */
+        .btn-voice { background: #0ea5e9; margin-bottom: 10px; }
+        .btn-voice.connected { background: #10b981; }
+
+        .log-box { background: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #475569; max-height: 120px; overflow-y: auto; font-size: 0.9rem; margin-top: 5px; }
         .log-line { border-bottom: 1px solid #334155; padding: 4px 0; color: #cbd5e1; }
         .log-line:last-child { border-bottom: none; }
 
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; z-index: 1000; padding: 20px; }
         .modal-content { background: #1e293b; border: 3px solid #3b82f6; padding: 20px; border-radius: 12px; max-width: 400px; width: 100%; text-align: center; }
-        .modal h3 { margin-bottom: 15px; }
         .modal-btns { display: flex; gap: 10px; margin-top: 20px; }
-        .btn-give { background: #10b981; }
-        .btn-fish { background: #ef4444; }
-        .rules-list { font-size: 0.85rem; color: #cbd5e1; line-height: 1.4; padding-left: 20px; }
     </style>
 </head>
 <body>
@@ -50,9 +57,9 @@
 
         <div id="lobby-view" class="section">
             <input type="text" id="username-input" placeholder="Enter Nickname" style="padding:10px; width:100%; border-radius:6px; margin-bottom:10px; color:black;">
-            <button onclick="joinLobby()" style="margin-bottom:10px;">Join Lobby</button>
+            <button onclick="joinLobby()">Join Lobby</button>
             
-            <div id="waiting-room" style="background: #1e293b; padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px dashed #475569;">
+            <div id="waiting-room" style="background: #1e293b; padding: 10px; border-radius: 6px; margin-top: 10px; margin-bottom: 10px; border: 1px dashed #475569;">
                 <strong style="color: #cbd5e1; font-size: 0.9rem;">Players in Lobby:</strong>
                 <ul id="lobby-players-list" style="list-style: none; padding: 5px 0 0 0; color: #10b981; font-weight: bold;">
                     <li>Waiting for players to connect...</li>
@@ -62,7 +69,16 @@
         </div>
 
         <div id="game-view" class="section" style="display:none;">
-            <h3>Opponents</h3>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <h3>Active Match Board</h3>
+                <div class="sys-btn-grid">
+                    <button class="btn-restart" style="padding:6px 12px; font-size:0.85rem;" onclick="triggerRestart()">Restart Match</button>
+                    <button class="btn-exit" style="padding:6px 12px; font-size:0.85rem;" onclick="triggerExit()">Exit Room</button>
+                </div>
+            </div>
+
+            <button id="voice-toggle-btn" class="btn-voice" onclick="initiateVoiceChat()">🎙️ Join Voice Chat Room</button>
+            
             <div class="opponents-grid" id="opponents-list"></div>
             
             <hr style="margin:15px 0; border-color:#475569;">
@@ -87,24 +103,16 @@
             <h3>Your Hand</h3>
             <div class="hand-flex" id="your-hand"></div>
         </div>
-
-        <div class="section">
-            <h3>📜 Official Rules</h3>
-            <ul class="rules-list">
-                <li>Choose an opponent and ask them for a specific card rank (2 through Ace).</li>
-                <li>If the opponent has cards of that rank, they <strong>must</strong> give you exactly ONE.</li>
-                <li>If they do not have that rank, they will tell you to <strong>"Go Fish!"</strong> and you can draw a card manually from the deck.</li>
-                <li>When you collect all 4 suits of a single rank, hit the <strong>Fold Matches</strong> button to gain points. The highest score wins!</li>
-            </ul>
-        </div>
     </div>
+
+    <div id="remote-audio-streams-container"></div>
 
     <div id="request-modal" class="modal">
         <div class="modal-content">
             <h3 id="request-message">Player is asking you for a card!</h3>
             <div class="modal-btns">
-                <button id="modal-give-btn" class="btn-give" onclick="respondGive()">Give Card</button>
-                <button id="modal-fish-btn" class="btn-fish" onclick="respondFish()">Go Fish</button>
+                <button id="modal-give-btn" style="background:#10b981;" onclick="respondGive()">Give Card</button>
+                <button id="modal-fish-btn" style="background:#ef4444;" onclick="respondFish()">Go Fish</button>
             </div>
         </div>
     </div>
