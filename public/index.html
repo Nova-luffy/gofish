@@ -3,120 +3,142 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Go Fish Multi-Slayer</title>
+    <title>Go Fish Multi-Slayer Arena</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
-        body { background-color: #1e293b; color: #f8fafc; padding: 15px; display: flex; justify-content: center; }
-        .game-container { width: 100%; max-width: 800px; display: flex; flex-direction: column; gap: 15px; }
-        h1 { text-align: center; font-size: 1.5rem; margin-bottom: 5px; }
-        .section { background: #334155; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        .opponents-grid { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 5px; }
-        .opponent-card { border: 2px solid #64748b; padding: 10px; border-radius: 6px; min-width: 120px; text-align: center; background: #1e293b; }
-        .active-turn { border-color: #10b981; background: #064e3b; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #0f172a; color: #f8fafc; padding: 15px; display: flex; justify-content: center; }
+        .game-container { width: 100%; max-width: 850px; display: flex; flex-direction: column; gap: 15px; }
+        h1 { text-align: center; font-size: 1.8rem; letter-spacing: 2px; text-shadow: 0 0 10px #3b82f6; color: #3b82f6; margin-bottom: 5px; }
+        .section { background: #1e293b; padding: 20px; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3); border: 1px solid #334155; transition: all 0.3s ease; }
         
-        .hand-flex { display: flex; gap: 15px; flex-wrap: wrap; padding: 12px 0; justify-content: flex-start; align-items: flex-start; }
+        .opponents-grid { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; }
+        .opponent-card { border: 2px solid #475569; padding: 12px; border-radius: 8px; min-width: 140px; text-align: center; background: #0f172a; transition: all 0.3s ease; }
         
-        /* Layout classes for columns grouping same rank cards */
-        .card-column { display: flex; flex-direction: column; gap: 6px; min-width: 70px; }
-        .card { background: white; color: black; border-radius: 6px; padding: 12px 8px; font-weight: bold; font-size: 1.1rem; text-align: center; width: 100%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); border: 3px solid transparent; }
-        .card.red { color: #dc2626; }
-        .card.quad-highlight { border-color: #22c55e !important; box-shadow: 0 0 12px #22c55e; background: #f0fdf4; }
+        @keyframes pulse-glow {
+            0% { box-shadow: 0 0 5px #10b981; border-color: #10b981; }
+            50% { box-shadow: 0 0 20px #10b981; border-color: #34d399; }
+            100% { box-shadow: 0 0 5px #10b981; border-color: #10b981; }
+        }
+        .active-turn { animation: pulse-glow 2s infinite ease-in-out; background: #022c22; }
 
-        .fold-badge { display: inline-block; background: #10b981; color: white; padding: 2px 5px; font-size: 0.75rem; border-radius: 4px; font-weight: bold; margin: 1px; }
-
-        .controls { display: flex; flex-direction: column; gap: 8px; }
-        select, button { padding: 11px; border-radius: 6px; border: none; font-size: 1rem; width: 100%; }
-        button { background: #3b82f6; color: white; font-weight: bold; cursor: pointer; transition: background 0.2s; }
-        button:hover { background: #2563eb; }
-        button:disabled { background: #475569; cursor: not-allowed; opacity: 0.5; }
+        .hand-flex { display: flex; gap: 12px; flex-wrap: wrap; padding: 15px 0; }
         
-        .btn-deck { background: #d97706; }
-        .btn-deck:hover { background: #b45309; }
-        .btn-fold { background: #10b981; }
-        .btn-fold:hover { background: #047857; }
+        @keyframes pop-in {
+            0% { transform: scale(0.7) translateY(20px); opacity: 0; }
+            100% { transform: scale(1) translateY(0); opacity: 1; }
+        }
+        .card { background: #ffffff; color: #0f172a; border-radius: 8px; padding: 16px 10px; font-weight: bold; font-size: 1.3rem; text-align: center; width: calc(25% - 9px); min-width: 75px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.5); border: 3px solid transparent; animation: pop-in 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) both; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+        .card:hover { transform: translateY(-8px) scale(1.05); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.7); cursor: default; }
+        .card.red { color: #ef4444; }
+        .card.quad-highlight { border-color: #22c55e !important; box-shadow: 0 0 15px #22c55e; background: #f0fdf4; }
+
+        .fold-badge { display: inline-block; background: #22c55e; color: white; padding: 2px 6px; font-size: 0.75rem; border-radius: 4px; font-weight: bold; margin: 2px; }
+
+        .controls { display: flex; flex-direction: column; gap: 10px; }
+        select, input[type="text"], button { padding: 12px; border-radius: 8px; border: 1px solid #475569; font-size: 1rem; width: 100%; background: #0f172a; color: white; transition: all 0.2s ease; }
+        select:focus, input[type="text"]:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 8px rgba(59,130,246,0.5); }
         
-        .sys-btn-grid { display: flex; gap: 10px; margin-top: 5px; }
-        .btn-restart { background: #8b5cf6; }
-        .btn-restart:hover { background: #7c3aed; }
-        .btn-exit { background: #ef4444; }
-        .btn-exit:hover { background: #dc2626; }
+        button { background: #3b82f6; font-weight: bold; cursor: pointer; border: none; }
+        button:hover { background: #2563eb; transform: translateY(-1px); }
+        button:active { transform: translateY(1px); }
+        button:disabled { background: #475569; cursor: not-allowed; opacity: 0.4; transform: none; }
+        
+        .btn-deck { background: #f59e0b; } .btn-deck:hover { background: #d97706; }
+        .btn-fold { background: #10b981; } .btn-fold:hover { background: #059669; }
+        .sys-btn-grid { display: flex; gap: 10px; }
+        .btn-restart { background: #8b5cf6; } .btn-restart:hover { background: #7c3aed; }
+        .btn-exit { background: #ef4444; } .btn-exit:hover { background: #dc2626; }
 
-        .log-box { background: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #475569; max-height: 120px; overflow-y: auto; font-size: 0.9rem; margin-top: 5px; }
-        .log-line { border-bottom: 1px solid #334155; padding: 4px 0; color: #cbd5e1; }
-        .log-line:last-child { border-bottom: none; }
+        .chat-area { display: flex; flex-direction: column; background: #0f172a; border-radius: 8px; border: 1px solid #475569; padding: 10px; }
+        #chat-box { height: 130px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 5px; margin-bottom: 10px; }
+        
+        @keyframes slide-chat {
+            0% { opacity: 0; transform: translateX(-10px); }
+            100% { opacity: 1; transform: translateX(0); }
+        }
+        .chat-msg { font-size: 0.9rem; word-break: break-all; animation: slide-chat 0.2s ease-out forwards; }
+        
+        .log-box { background: #0f172a; border-radius: 8px; padding: 10px; border: 1px solid #475569; height: 110px; overflow-y: auto; font-size: 0.85rem; }
+        .log-line { border-bottom: 1px solid #1e293b; padding: 6px 0; color: #cbd5e1; }
 
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; z-index: 1000; padding: 20px; }
-        .modal-content { background: #1e293b; border: 3px solid #3b82f6; padding: 20px; border-radius: 12px; max-width: 400px; width: 100%; text-align: center; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15,23,42,0.85); justify-content: center; align-items: center; z-index: 1000; backdrop-filter: blur(4px); }
+        .modal-content { background: #1e293b; border: 2px solid #3b82f6; padding: 25px; border-radius: 12px; max-width: 400px; width: 100%; text-align: center; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
         .modal-btns { display: flex; gap: 10px; margin-top: 20px; }
     </style>
 </head>
 <body>
     <div class="game-container">
-        <h1>Go Fish Multi-Slayer</h1>
+        <h1>GO FISH: ARENA</h1>
 
         <div id="lobby-view" class="section">
-            <input type="text" id="username-input" placeholder="Enter Nickname" style="padding:10px; width:100%; border-radius:6px; margin-bottom:10px; color:black;">
-            <button onclick="joinLobby()">Join Lobby</button>
+            <input type="text" id="username-input" placeholder="Enter Cool Display Nickname" style="margin-bottom:12px;">
+            <button onclick="joinLobby()" style="margin-bottom:15px;">Join Active Server Match</button>
             
-            <div id="waiting-room" style="background: #1e293b; padding: 10px; border-radius: 6px; margin-top: 10px; margin-bottom: 10px; border: 1px dashed #475569;">
-                <strong style="color: #cbd5e1; font-size: 0.9rem;">Players in Lobby:</strong>
-                <ul id="lobby-players-list" style="list-style: none; padding: 5px 0 0 0; color: #10b981; font-weight: bold;">
-                    <li>Waiting for players to connect...</li>
+            <div style="background: #0f172a; padding: 12px; border-radius: 8px; margin-bottom: 15px; border: 1px dashed #475569;">
+                <strong style="color: #94a3b8; font-size: 0.9rem;">Connected Session Members:</strong>
+                <ul id="lobby-players-list" style="list-style: none; padding-top: 5px; color: #34d399; font-weight: bold;">
+                    <li>Waiting for players to step in...</li>
                 </ul>
             </div>
-            <button onclick="socket.emit('start_game')" style="background:#10b981;">Start Game</button>
+            <button onclick="socket.emit('start_game')" style="background:#10b981;">⚔️ LAUNCH COMBAT ARENA</button>
         </div>
 
         <div id="game-view" class="section" style="display:none;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <h3>Active Match Board</h3>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h3 style="color:#64748b;">Opponent Nodes</h3>
                 <div class="sys-btn-grid">
-                    <button class="btn-restart" style="padding:6px 12px; font-size:0.85rem;" onclick="triggerRestart()">Restart Match</button>
+                    <button class="btn-restart" style="padding:6px 12px; font-size:0.85rem;" onclick="triggerRestart()">Restart</button>
                     <button class="btn-exit" style="padding:6px 12px; font-size:0.85rem;" onclick="triggerExit()">Exit Room</button>
                 </div>
             </div>
             
             <div class="opponents-grid" id="opponents-list"></div>
             
-            <hr style="margin:15px 0; border-color:#475569;">
+            <hr style="margin:15px 0; border-color:#334155;">
+
+            <div class="section" style="background:#131e31; padding:15px; margin-bottom:15px; border-color:#475569;">
+                <h3 style="font-size:1rem; margin-bottom:8px; color:#3b82f6;">🎮 Realtime Match Chat</h3>
+                <div class="chat-area">
+                    <div id="chat-box"></div>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="chat-input" placeholder="Type tactical message..." onkeydown="if(event.key==='Enter') sendChatMessage()">
+                        <button onclick="sendChatMessage()" style="width: auto; padding: 0 20px;">Send</button>
+                    </div>
+                </div>
+            </div>
             
             <div class="controls">
-                <h3>Your Turn Actions</h3>
-                <label>Target Player:</label> <select id="target-player-select" style="color:black;"></select>
-                <label>Rank:</label> <select id="target-rank-select" style="color:black;"></select>
-                <button id="ask-btn" onclick="submitAsk()">Ask For Card</button>
+                <h3>Your Strategic Action Phase</h3>
+                <label style="font-size:0.85rem; color:#94a3b8;">Target Competitor Player Node:</label> 
+                <select id="target-player-select"></select>
                 
-                <button class="btn-deck" onclick="drawFromDeck()">Draw From Deck Pile</button>
-                <button class="btn-fold" onclick="triggerManualFold()">Check & Fold Matches (Auto-Select 4)</button>
+                <label style="font-size:0.85rem; color:#94a3b8;">Desired Query Value Rank:</label> 
+                <select id="target-rank-select"></select>
+                
+                <button id="ask-btn" onclick="submitAsk()">Execute Card Demand</button>
+                
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:5px;">
+                    <button class="btn-deck" onclick="drawFromDeck()">🃏 Draw From Deck</button>
+                    <button class="btn-fold" onclick="triggerManualFold()">🎁 Fold 4-of-a-Kind</button>
+                </div>
             </div>
 
-            <hr style="margin:15px 0; border-color:#475569;">
-
-            <h3>Game Chat</h3>
-            <div class="log-box" id="chat-box" style="height: 110px;"></div>
-            <div style="display: flex; gap: 6px; margin-top: 6px;">
-                <input type="text" id="chat-input" placeholder="Type room message..." style="padding: 10px; border-radius: 6px; width: 100%; color: black; border: none;">
-                <button onclick="sendChatMessage()" style="width: auto; padding: 0 20px;">Send</button>
-            </div>
-
-            <hr style="margin:15px 0; border-color:#475569;">
-
-            <h3>Turn Completion Logs</h3>
+            <hr style="margin:20px 0; border-color:#334155;">
+            <h3>Combat System Transaction Feed Log</h3>
             <div class="log-box" id="history-log-box"></div>
 
-            <hr style="margin:15px 0; border-color:#475569;">
-
-            <h3>Your Hand</h3>
+            <hr style="margin:20px 0; border-color:#334155;">
+            <h3>Your Structural Tactical Hand</h3>
             <div class="hand-flex" id="your-hand"></div>
         </div>
     </div>
 
     <div id="request-modal" class="modal">
         <div class="modal-content">
-            <h3 id="request-message">Player is asking you for a card!</h3>
+            <h3 id="request-message" style="margin-bottom:15px;">Target Player Request Pending...</h3>
             <div class="modal-btns">
-                <button id="modal-give-btn" style="background:#10b981;" onclick="respondGive()">Give Card</button>
-                <button id="modal-fish-btn" style="background:#ef4444;" onclick="respondFish()">Go Fish</button>
+                <button id="modal-give-btn" style="background:#10b981;" onclick="respondGive()">Relinquish Card</button>
+                <button id="modal-fish-btn" style="background:#ef4444;" onclick="respondFish()">Declare Go Fish</button>
             </div>
         </div>
     </div>

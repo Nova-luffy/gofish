@@ -7,15 +7,23 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+// Force HTTPS on Render
+app.use((req, res, next) => {
+    if (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-proto'] !== 'https') {
+        return res.redirect(`https://${req.headers.host}${req.url}`);
+    }
+    next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 let gameState = {
-    players: [],
-    deck: [],
+    players: [],        
+    deck: [],           
     currentTurnIndex: 0,
     gameStarted: false,
     log: [],
-    chat: [] // Tracks universal chat messages
+    chatHistory: []
 };
 
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
@@ -38,20 +46,19 @@ function createAndShuffleDeck() {
 function addToLog(message) {
     const logEntry = { id: Date.now() + Math.random(), text: message };
     gameState.log.push(logEntry);
-    setTimeout(() => {
-        gameState.log = gameState.log.filter(entry => entry.id !== logEntry.id);
-        broadcastState();
-    }, 10000);
+    if (gameState.log.length > 15) gameState.log.shift();
 }
 
 function resetGameStructure() {
     gameState.deck = createAndShuffleDeck();
     gameState.players.forEach(p => {
-        p.hand = gameState.deck.splice(0, 4); // Deals exactly 4 cards per player
+        p.hand = gameState.deck.splice(0, 4); // Exactly 4 cards per player
         p.folds = 0;
         p.foldedRanks = [];
     });
     gameState.currentTurnIndex = 0;
+    gameState.log = [];
+    addToLog("The match has officially begun! 🃏");
 }
 
 function broadcastState() {
@@ -70,7 +77,6 @@ function broadcastState() {
             players: maskedPlayers,
             deckCount: gameState.deck.length,
             log: gameState.log.map(entry => entry.text),
-            chat: gameState.chat, // Send full chat history
             isYourTurn: idx === gameState.currentTurnIndex,
             gameStarted: gameState.gameStarted
         });
@@ -79,14 +85,29 @@ function broadcastState() {
 
 io.on('connection', (socket) => {
     socket.on('join_game', (name) => {
-        const actualName = (typeof name === 'object' && name !== null) ? name.name : name;
         if (gameState.gameStarted || gameState.players.length >= 6) {
             socket.emit('error_message', "Game full or already started.");
             return;
         }
-        gameState.players.push({ id: socket.id, name: actualName || `Player ${gameState.players.length + 1}`, hand: [], folds: 0, foldedRanks: [] });
-        addToLog(`${actualName || socket.id} joined the room.`);
+        gameState.players.push({ 
+            id: socket.id, 
+            name: name || `Player ${gameState.players.length + 1}`, 
+            hand: [], 
+            folds: 0,
+            foldedRanks: [] 
+        });
+        addToLog(`${name || socket.id} entered the lobby.`);
         io.emit('room_update', gameState.players.map(p => p.name));
+    });
+
+    socket.on('send_chat', (msg) => {
+        const player = gameState.players.find(p => p.id === socket.id);
+        if (player) {
+            const chatItem = { name: player.name, text: msg, id: Date.now() };
+            gameState.chatHistory.push(chatItem);
+            if (gameState.chatHistory.length > 25) gameState.chatHistory.shift();
+            io.emit('update_chat', gameState.chatHistory);
+        }
     });
 
     socket.on('start_game', () => {
@@ -96,56 +117,39 @@ io.on('connection', (socket) => {
         }
         gameState.gameStarted = true;
         resetGameStructure();
-        addToLog("The game has begun!");
         broadcastState();
-    });
-
-    socket.on('restart_match', () => {
-        if (!gameState.gameStarted) return;
-        resetGameStructure();
-        addToLog("🔄 The match was restarted!");
-        broadcastState();
-    });
-
-    socket.on('leave_game', () => {
-        gameState.players = [];
-        gameState.deck = [];
-        gameState.gameStarted = false;
-        gameState.log = [];
-        gameState.chat = [];
-        io.emit('global_logout_forced');
-        io.emit('room_update', []);
-    });
-
-    socket.on('send_chat', (message) => {
-        const player = gameState.players.find(p => p.id === socket.id);
-        if (player) {
-            gameState.chat.push(`${player.name}: ${message}`);
-            if (gameState.chat.length > 40) gameState.chat.shift(); // Keep logs clean
-            broadcastState();
-        }
     });
 
     socket.on('ask_card', ({ targetId, rank }) => {
         const currentPlayer = gameState.players[gameState.currentTurnIndex];
         if (!currentPlayer || socket.id !== currentPlayer.id) return;
-        io.emit('card_requested', { targetId, rank, askerId: currentPlayer.id, askerName: currentPlayer.name });
+
+        const targetPlayer = gameState.players.find(p => p.id === targetId);
+        if (!targetPlayer) return;
+
+        io.emit('card_requested', {
+            targetId: targetId,
+            rank: rank,
+            askerId: currentPlayer.id,
+            askerName: currentPlayer.name
+        });
     });
 
     socket.on('resolve_request', ({ targetId, rank, askerId, action }) => {
         const currentPlayer = gameState.players.find(p => p.id === askerId);
         const targetPlayer = gameState.players.find(p => p.id === targetId);
+
         if (!currentPlayer || !targetPlayer) return;
 
         if (action === 'give') {
-            const cardIndex = targetPlayer.hand.findIndex(c => c.rank === rank);
-            if (cardIndex !== -1) {
-                const [transferredCard] = targetPlayer.hand.splice(cardIndex, 1);
-                currentPlayer.hand.push(transferredCard);
-                addToLog(`🎯 ${currentPlayer.name} took a card from ${targetPlayer.name}.`);
-            }
-        } else {
+            const matchingCards = targetPlayer.hand.filter(c => c.rank === rank);
+            targetPlayer.hand = targetPlayer.hand.filter(c => c.rank !== rank);
+            currentPlayer.hand.push(...matchingCards);
+            addToLog(`🎯 ${currentPlayer.name} took ${matchingCards.length} [${rank}] card(s) from ${targetPlayer.name}!`);
+            io.emit('sound_trigger', 'success');
+        } else if (action === 'fish') {
             addToLog(`🐟 ${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s. Go Fish!`);
+            io.emit('sound_trigger', 'fish');
         }
         broadcastState();
     });
@@ -153,43 +157,60 @@ io.on('connection', (socket) => {
     socket.on('draw_from_deck', () => {
         const currentPlayer = gameState.players[gameState.currentTurnIndex];
         if (!currentPlayer || socket.id !== currentPlayer.id || gameState.deck.length === 0) return;
-        currentPlayer.hand.push(gameState.deck.pop());
+
+        const drawnCard = gameState.deck.pop();
+        currentPlayer.hand.push(drawnCard);
+        addToLog(`🃏 ${currentPlayer.name} drew a card.`);
+
         gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
+        io.emit('sound_trigger', 'draw');
         broadcastState();
     });
 
     socket.on('manual_fold_check', () => {
         const player = gameState.players.find(p => p.id === socket.id);
         if (!player) return;
+
         const counts = {};
-        player.hand.forEach(c => counts[c.rank] = (counts[c.rank] || 0) + 1);
-        
+        player.hand.forEach(card => counts[card.rank] = (counts[card.rank] || 0) + 1);
+
         let foldedAny = false;
         for (let rank in counts) {
             if (counts[rank] === 4) {
-                player.hand = player.hand.filter(c => c.rank !== rank);
+                player.hand = player.hand.filter(card => card.rank !== rank);
                 player.folds += 1;
+                if (!player.foldedRanks) player.foldedRanks = [];
                 player.foldedRanks.push(rank);
                 foldedAny = true;
             }
         }
 
         if (foldedAny) {
-            // Log message to other players without showing the rank
-            addToLog(`✅ ${player.name} successfully folded a set!`);
+            addToLog(`🎁 ${player.name} completed and folded a set of ${4}s!`);
+            socket.emit('sound_trigger', 'fold');
         } else {
             socket.emit('error_message', "No 4-of-a-kind sets found to fold.");
         }
         broadcastState();
     });
 
+    socket.on('leave_game', () => {
+        gameState.players = [];
+        gameState.deck = [];
+        gameState.gameStarted = false;
+        gameState.chatHistory = [];
+        gameState.log = [];
+        io.emit('global_logout_forced');
+    });
+
     socket.on('disconnect', () => {
         gameState.players = gameState.players.filter(p => p.id !== socket.id);
-        if(gameState.players.length === 0) gameState.gameStarted = false;
+        if (gameState.players.length === 0) gameState.gameStarted = false;
+        else gameState.currentTurnIndex = gameState.currentTurnIndex % gameState.players.length;
         io.emit('room_update', gameState.players.map(p => p.name));
         broadcastState();
     });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`Server live on port ${PORT}`));
