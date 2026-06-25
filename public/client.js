@@ -6,7 +6,7 @@ let activeRequest = null;
 // Voice Chat Infrastructure Variables
 let localStream = null;
 let peerConnections = {}; 
-const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19002' }] };
+const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19002' },{ urls: 'stun:stun.l.google.com:19302' },{ urls: 'stun:stun1.l.google.com:19302' }, { urls: 'stun:stun2.l.google.com:19302' },{ urls: 'stun:stun3.l.google.com:19302' },{ urls: 'stun:stun4.l.google.com:19302' }] };
 
 // Voice Controller System Variances
 let voiceMode = 'open'; 
