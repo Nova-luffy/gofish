@@ -7,19 +7,11 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// 🛡️ ENFORCE HTTPS REDIRECT FOR DEPLOYMENTS (Render Load Balancer Rule)
-app.use((req, res, next) => {
-    if (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-proto'] !== 'https') {
-        return res.redirect(`https://${req.headers.host}${req.url}`);
-    }
-    next();
-});
-
 app.use(express.static(path.join(__dirname, 'public')));
 
 let gameState = {
-    players: [],        
-    deck: [],           
+    players: [],
+    deck: [],
     currentTurnIndex: 0,
     gameStarted: false,
     log: []
@@ -45,7 +37,6 @@ function createAndShuffleDeck() {
 function addToLog(message) {
     const logEntry = { id: Date.now() + Math.random(), text: message };
     gameState.log.push(logEntry);
-
     setTimeout(() => {
         gameState.log = gameState.log.filter(entry => entry.id !== logEntry.id);
         broadcastState();
@@ -55,7 +46,7 @@ function addToLog(message) {
 function resetGameStructure() {
     gameState.deck = createAndShuffleDeck();
     gameState.players.forEach(p => {
-        p.hand = gameState.deck.splice(0, 5); 
+        p.hand = gameState.deck.splice(0, 4); // Changed to 4 cards per player
         p.folds = 0;
         p.foldedRanks = [];
     });
@@ -77,7 +68,7 @@ function broadcastState() {
             yourHand: p.hand,
             players: maskedPlayers,
             deckCount: gameState.deck.length,
-            log: gameState.log.map(entry => entry.text), 
+            log: gameState.log.map(entry => entry.text),
             isYourTurn: idx === gameState.currentTurnIndex,
             gameStarted: gameState.gameStarted
         });
@@ -87,18 +78,11 @@ function broadcastState() {
 io.on('connection', (socket) => {
     socket.on('join_game', (name) => {
         const actualName = (typeof name === 'object' && name !== null) ? name.name : name;
-
         if (gameState.gameStarted || gameState.players.length >= 6) {
             socket.emit('error_message', "Game full or already started.");
             return;
         }
-        gameState.players.push({ 
-            id: socket.id, 
-            name: actualName || `Player ${gameState.players.length + 1}`, 
-            hand: [], 
-            folds: 0,
-            foldedRanks: [] 
-        });
+        gameState.players.push({ id: socket.id, name: actualName || `Player ${gameState.players.length + 1}`, hand: [], folds: 0, foldedRanks: [] });
         addToLog(`${actualName || socket.id} joined the room.`);
         io.emit('room_update', gameState.players.map(p => p.name));
     });
@@ -117,73 +101,48 @@ io.on('connection', (socket) => {
     socket.on('restart_match', () => {
         if (!gameState.gameStarted) return;
         resetGameStructure();
-        addToLog("🔄 The match was restarted by a player!");
+        addToLog("🔄 The match was restarted!");
         broadcastState();
     });
 
     socket.on('leave_game', () => {
+        // Reset the game for everyone and return to lobby
         gameState.players = [];
         gameState.deck = [];
         gameState.gameStarted = false;
         gameState.log = [];
-        
-        io.emit('global_logout_forced'); 
+        io.emit('global_logout_forced');
         io.emit('room_update', []);
-    });
-
-    socket.on('voice_ready_handshake', () => {
-        socket.broadcast.emit('voice_user_joined', socket.id);
-    });
-
-    socket.on('voice_signal', ({ targetId, signal }) => {
-        io.to(targetId).emit('voice_signal_received', {
-            senderId: socket.id,
-            signal: signal
-        });
     });
 
     socket.on('ask_card', ({ targetId, rank }) => {
         const currentPlayer = gameState.players[gameState.currentTurnIndex];
         if (!currentPlayer || socket.id !== currentPlayer.id) return;
-
-        const targetPlayer = gameState.players.find(p => p.id === targetId);
-        if (!targetPlayer) return;
-
-        io.emit('card_requested', {
-            targetId: targetId,
-            rank: rank,
-            askerId: currentPlayer.id,
-            askerName: currentPlayer.name
-        });
+        io.emit('card_requested', { targetId, rank, askerId: currentPlayer.id, askerName: currentPlayer.name });
     });
 
     socket.on('resolve_request', ({ targetId, rank, askerId, action }) => {
         const currentPlayer = gameState.players.find(p => p.id === askerId);
         const targetPlayer = gameState.players.find(p => p.id === targetId);
-
         if (!currentPlayer || !targetPlayer) return;
 
         if (action === 'give') {
-            const matchingCards = targetPlayer.hand.filter(c => c.rank === rank);
-            targetPlayer.hand = targetPlayer.hand.filter(c => c.rank !== rank);
-            currentPlayer.hand.push(...matchingCards);
-            
-            addToLog(`🎯 ${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s and took ${matchingCards.length} card(s).`);
-        } else if (action === 'fish') {
+            const cardIndex = targetPlayer.hand.findIndex(c => c.rank === rank);
+            if (cardIndex !== -1) {
+                const [transferredCard] = targetPlayer.hand.splice(cardIndex, 1);
+                currentPlayer.hand.push(transferredCard);
+                addToLog(`🎯 ${currentPlayer.name} took a ${rank} from ${targetPlayer.name}.`);
+            }
+        } else {
             addToLog(`🐟 ${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s. Go Fish!`);
         }
-
         broadcastState();
     });
 
     socket.on('draw_from_deck', () => {
         const currentPlayer = gameState.players[gameState.currentTurnIndex];
         if (!currentPlayer || socket.id !== currentPlayer.id || gameState.deck.length === 0) return;
-
-        const drawnCard = gameState.deck.pop();
-        currentPlayer.hand.push(drawnCard);
-        addToLog(`🃏 ${currentPlayer.name} drew a card from the deck.`);
-
+        currentPlayer.hand.push(gameState.deck.pop());
         gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
         broadcastState();
     });
@@ -191,39 +150,22 @@ io.on('connection', (socket) => {
     socket.on('manual_fold_check', () => {
         const player = gameState.players.find(p => p.id === socket.id);
         if (!player) return;
-
         const counts = {};
-        player.hand.forEach(card => {
-            counts[card.rank] = (counts[card.rank] || 0) + 1;
-        });
-
-        let foldedAny = false;
+        player.hand.forEach(c => counts[c.rank] = (counts[c.rank] || 0) + 1);
         for (let rank in counts) {
             if (counts[rank] === 4) {
-                player.hand = player.hand.filter(card => card.rank !== rank);
-                player.folds += 1; 
-                if (!player.foldedRanks) player.foldedRanks = [];
+                player.hand = player.hand.filter(c => c.rank !== rank);
+                player.folds += 1;
                 player.foldedRanks.push(rank);
-                foldedAny = true;
+                addToLog(`✅ ${player.name} folded a set of ${rank}s!`);
             }
         }
-
-        if (!foldedAny) {
-            socket.emit('error_message', "No 4-of-a-kind sets found in your hand to fold!");
-        } else {
-            addToLog(`🎁 ${player.name} folded a complete set of 4-of-a-kind!`);
-        }
-
         broadcastState();
     });
 
     socket.on('disconnect', () => {
         gameState.players = gameState.players.filter(p => p.id !== socket.id);
-        if(gameState.players.length === 0) {
-            gameState.gameStarted = false;
-        } else {
-            gameState.currentTurnIndex = gameState.currentTurnIndex % gameState.players.length;
-        }
+        if(gameState.players.length === 0) gameState.gameStarted = false;
         io.emit('room_update', gameState.players.map(p => p.name));
         broadcastState();
     });

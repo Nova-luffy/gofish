@@ -38,9 +38,6 @@
         .btn-exit { background: #ef4444; }
         .btn-exit:hover { background: #dc2626; }
 
-        .btn-voice { background: #0ea5e9; margin-bottom: 10px; }
-        .btn-voice.connected { background: #10b981; }
-
         .log-box { background: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #475569; max-height: 120px; overflow-y: auto; font-size: 0.9rem; margin-top: 5px; }
         .log-line { border-bottom: 1px solid #334155; padding: 4px 0; color: #cbd5e1; }
         .log-line:last-child { border-bottom: none; }
@@ -75,28 +72,6 @@
                     <button class="btn-exit" style="padding:6px 12px; font-size:0.85rem;" onclick="triggerExit()">Exit Room</button>
                 </div>
             </div>
-
-            <div style="background: #1e293b; padding: 12px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #475569;">
-                <h4 style="margin-bottom: 8px; font-size: 0.9rem; color: #cbd5e1;">Voice Chat Controls</h4>
-                <div id="voice-mode-controls" style="display: flex; gap: 8px; flex-direction: column;">
-                    <button id="voice-toggle-btn" class="btn-voice" onclick="initiateVoiceChat()">🎙️ Connect Audio Hardware</button>
-                    
-                    <div id="voice-management-actions" style="display: none; gap: 8px;">
-                        <button id="btn-mode-open" onclick="setVoiceMode('open')" style="background: #475569;">🗣️ Open Talk</button>
-                        <button id="btn-mode-ptt" onclick="setVoiceMode('ptt')" style="background: #475569;">🔘 Push-to-Talk</button>
-                        <button id="btn-close-voice" onclick="closeVoiceChat()" style="background: #ef4444;">❌ Close Chat</button>
-                    </div>
-                    
-                    <div id="ptt-trigger-area" style="display: none; margin-top: 5px;">
-                        <button id="ptt-action-btn" style="background: #d97706; padding: 15px; font-size: 1.1rem;" 
-                                onmousedown="pttHoldStart()" onmouseup="pttHoldEnd()" 
-                                ontouchstart="pttHoldStart()" ontouchend="pttHoldEnd()">
-                            🛑 HOLD TO TALK (Muted)
-                        </button>
-                        <p style="font-size: 0.75rem; color: #94a3b8; text-align: center; margin-top: 4px;">Tip: You can also hold the [Spacebar] on your keyboard</p>
-                    </div>
-                </div>
-            </div>
             
             <div class="opponents-grid" id="opponents-list"></div>
             
@@ -123,8 +98,6 @@
             <div class="hand-flex" id="your-hand"></div>
         </div>
     </div>
-
-    <div id="remote-audio-streams-container"></div>
 
     <div id="request-modal" class="modal">
         <div class="modal-content">

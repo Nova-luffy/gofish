@@ -3,15 +3,6 @@ let myId = null;
 let currentHand = [];
 let activeRequest = null;
 
-// Voice Chat Infrastructure Variables
-let localStream = null;
-let peerConnections = {}; 
-const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19002' },{ urls: 'stun:stun.l.google.com:19302' },{ urls: 'stun:stun1.l.google.com:19302' }, { urls: 'stun:stun2.l.google.com:19302' },{ urls: 'stun:stun3.l.google.com:19302' },{ urls: 'stun:stun4.l.google.com:19302' }] };
-
-// Voice Controller System Variances
-let voiceMode = 'open'; 
-let isPttActive = false; 
-
 socket.on('state_update', (state) => {
     myId = socket.id;
     
@@ -82,9 +73,6 @@ socket.on('room_update', (namesArray) => {
 });
 
 socket.on('global_logout_forced', () => {
-    if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-    }
     alert("An active member hit Exit! The session has been wiped and returned to Lobby.");
     location.reload(); 
 });
@@ -104,181 +92,10 @@ socket.on('card_requested', (data) => {
 
 socket.on('error_message', (msg) => { alert(msg); });
 
-// WebRTC Voice Infrastructure Setup Modules
-async function initiateVoiceChat() {
-    if (localStream) return;
-
-    try {
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        
-        document.getElementById('voice-toggle-btn').style.display = 'none';
-        document.getElementById('voice-management-actions').style.display = 'flex';
-        
-        setVoiceMode('open');
-        socket.emit('voice_ready_handshake');
-    } catch (err) {
-        alert("Audio Mic permission initialization blocked or unsupported over non-HTTPS!");
-    }
-}
-
-function setVoiceMode(mode) {
-    voiceMode = mode;
-    
-    const openBtn = document.getElementById('btn-mode-open');
-    const pttBtn = document.getElementById('btn-mode-ptt');
-    const pttArea = document.getElementById('ptt-trigger-area');
-    
-    if (mode === 'open') {
-        openBtn.style.background = '#10b981';
-        pttBtn.style.background = '#475569';
-        pttArea.style.display = 'none';
-        setLocalAudioMute(false);
-    } else if (mode === 'ptt') {
-        pttBtn.style.background = '#10b981';
-        openBtn.style.background = '#475569';
-        pttArea.style.display = 'block';
-        setLocalAudioMute(true);
-    }
-}
-
-function setLocalAudioMute(isMuted) {
-    if (localStream && localStream.getAudioTracks().length > 0) {
-        localStream.getAudioTracks()[0].enabled = !isMuted;
-    }
-}
-
-function pttHoldStart() {
-    if (voiceMode !== 'ptt') return;
-    isPttActive = true;
-    const pttBtn = document.getElementById('ptt-action-btn');
-    pttBtn.innerText = "🎙️ TRANSMITTING LIVE...";
-    pttBtn.style.background = '#10b981';
-    setLocalAudioMute(false);
-}
-
-function pttHoldEnd() {
-    if (voiceMode !== 'ptt' || !isPttActive) return;
-    isPttActive = false;
-    const pttBtn = document.getElementById('ptt-action-btn');
-    pttBtn.innerText = "🛑 HOLD TO TALK (Muted)";
-    pttBtn.style.background = '#d97706';
-    setLocalAudioMute(true);
-}
-
-function closeVoiceChat() {
-    if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-        localStream = null;
-    }
-
-    for (let targetId in peerConnections) {
-        peerConnections[targetId].close();
-        delete peerConnections[targetId];
-        
-        const audioEl = document.getElementById(`audio-${targetId}`);
-        if (audioEl) audioEl.remove();
-    }
-
-    document.getElementById('voice-management-actions').style.display = 'none';
-    document.getElementById('ptt-trigger-area').style.display = 'none';
-    
-    const btn = document.getElementById('voice-toggle-btn');
-    btn.style.display = 'block';
-    btn.innerText = "🎙️ Join Voice Chat Room";
-    btn.classList.remove('connected');
-    
-    alert("Voice Chat disconnected successfully!");
-}
-
-socket.on('voice_user_joined', async (userId) => {
-    if (!localStream) return;
-    createPeerConnection(userId, true);
-});
-
-socket.on('voice_signal_received', async ({ senderId, signal }) => {
-    if (!localStream) return;
-    
-    if (signal.candidate) {
-        if (peerConnections[senderId]) {
-            await peerConnections[senderId].addIceCandidate(new RTCIceCandidate(signal.candidate)).catch(e => {});
-        }
-        return;
-    }
-
-    if (!peerConnections[senderId]) {
-        createPeerConnection(senderId, false);
-    }
-    
-    if (signal.sdp) {
-        await peerConnections[senderId].setRemoteDescription(new RTCSessionDescription(signal));
-        if (signal.type === 'offer') {
-            const answer = await peerConnections[senderId].createAnswer();
-            await peerConnections[senderId].setLocalDescription(answer);
-            socket.emit('voice_signal', { targetId: senderId, signal: answer });
-        }
-    }
-});
-
-function createPeerConnection(targetId, isOffer) {
-    const pc = new RTCPeerConnection(rtcConfig);
-    peerConnections[targetId] = pc;
-
-    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-
-    pc.onicecandidate = (event) => {
-        if (event.candidate) {
-            socket.emit('voice_signal', { targetId, signal: { candidate: event.candidate } });
-        }
-    };
-
-    // Find this block inside createPeerConnection(targetId, isOffer)
-    pc.ontrack = (event) => {
-        let audioEl = document.getElementById(`audio-${targetId}`);
-        if (!audioEl) {
-            audioEl = document.createElement('audio');
-            audioEl.id = `audio-${targetId}`;
-            audioEl.autoplay = true;
-            
-            // --- ADD THIS LINE HERE ---
-            audioEl.controls = true; 
-            
-            document.getElementById('remote-audio-streams-container').appendChild(audioEl);
-        }
-        audioEl.srcObject = event.streams[0];
-    };
-
-    if (isOffer) {
-        pc.onnegotiationneeded = async () => {
-            try {
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                socket.emit('voice_signal', { targetId, signal: offer });
-            } catch (err) {
-                console.error("Negotiation setup failed", err);
-            }
-        };
-    }
-}
-
 function joinLobby() {
     const name = document.getElementById('username-input').value;
     if(name) { socket.emit('join_game', name); } else { alert("Please enter a nickname!"); }
 }
-
-// Global window layout listeners handling physical Spacebar events for PTT transitions
-window.addEventListener('keydown', (e) => {
-    if (voiceMode === 'ptt' && e.code === 'Space' && !isPttActive) {
-        e.preventDefault(); 
-        pttHoldStart();
-    }
-});
-
-window.addEventListener('keyup', (e) => {
-    if (voiceMode === 'ptt' && e.code === 'Space') {
-        e.preventDefault();
-        pttHoldEnd();
-    }
-});
 
 function submitAsk() {
     const targetId = document.getElementById('target-player-select').value;
