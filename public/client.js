@@ -71,11 +71,21 @@ socket.on('state_update', (state) => {
     currentHand.forEach(c => { rankCounts[c.rank] = (rankCounts[c.rank] || 0) + 1; });
 
     const handDiv = document.getElementById('your-hand');
+    const totalCards = currentHand.length;
+
     handDiv.innerHTML = currentHand.map((c, idx) => {
         const isRed = c.suit === '♥' || c.suit === '♦';
         const isQuad = rankCounts[c.rank] === 4;
+        
+        // --- CASINO CARD FAN MATHEMATICS ---
+        const midIndex = (totalCards - 1) / 2;
+        const cardAngle = (idx - midIndex) * 6; 
+        const archTranslateY = Math.pow(Math.abs(idx - midIndex), 1.4) * 3.5; 
+        const spreadTranslateX = (idx - midIndex) * -2;
+
         return `
-            <div class="playing-card ${isRed ? 'red' : ''} ${isQuad ? 'quad-highlight' : ''}" style="animation-delay: ${idx * 0.05}s">
+            <div class="playing-card ${isRed ? 'red' : ''} ${isQuad ? 'quad-highlight' : ''}" 
+                 style="animation-delay: ${idx * 0.03}s; transform: translateX(${spreadTranslateX}px) translateY(${archTranslateY}px) rotate(${cardAngle}deg);">
                 <div class="card-corner top-left">
                     <span class="rank">${c.rank}</span>
                     <span class="suit">${c.suit}</span>
@@ -100,7 +110,7 @@ socket.on('state_update', (state) => {
             layeredShadows += `${i}px ${i}px 0px #7f1d1d, `;
         }
         layeredShadows += `${structuralLayersCount+1}px ${structuralLayersCount+1}px 5px rgba(0,0,0,0.5)`;
-        visualDeckStack.innerHTML = `<div class="deck-stack-card" style="box-shadow: ${layeredShadows}">🐟</div>`;
+        visualDeckStack.innerHTML = `<div class="deck-stack-card" style="box-shadow: ${layeredShadows}">🎴</div>`;
     } else {
         visualDeckStack.innerHTML = `<div class="deck-stack-card" style="background:#1e293b; border:2px dashed #475569; box-shadow:none; color:#475569;">EMPTY</div>`;
     }
@@ -116,10 +126,20 @@ socket.on('state_update', (state) => {
         rankSelect.innerHTML = allRanks.map(r => `<option value="${r}">Rank: ${r}</option>`).join('');
     }
 
+    // --- TURN CONTROL ENGINE ---
     document.getElementById('ask-btn').disabled = !state.isYourTurn;
-    document.getElementById('deck-draw-click-trigger').style.pointerEvents = state.isYourTurn ? 'auto' : 'none';
+    
+    const canClickDeck = state.isYourTurn || state.awaitingFishDraw;
+    document.getElementById('deck-draw-click-trigger').style.pointerEvents = canClickDeck ? 'auto' : 'none';
+    
+    const deckWrapperElement = document.getElementById('deck-draw-click-trigger');
+    if (state.awaitingFishDraw) {
+        deckWrapperElement.style.outline = "3px solid #10b981";
+        deckWrapperElement.style.borderRadius = "12px";
+    } else {
+        deckWrapperElement.style.outline = "none";
+    }
 
-    // Renders active fading log tracks matching their unique IDs
     const historyBox = document.getElementById('history-log-box');
     const logsHTML = (state.log || []).map(entry => `<div class="log-line" data-id="${entry.id}">${entry.text}</div>`).join('');
     if (historyBox.innerHTML !== logsHTML) {
@@ -131,7 +151,7 @@ socket.on('state_update', (state) => {
     oppList.innerHTML = state.players
         .map(p => {
             const isMe = p.id === myId;
-            const foldBadgesHTML = (p.foldedRanks || []).map(r => `<span class="fold-badge">🎁 ${r}</span>`).join(' ');
+            const foldBadgesHTML = (p.foldedRanks || []).map(r => `<span class="fold-badge">🎖️ ${r}</span>`).join(' ');
             return `
                 <div class="opponent-card ${p.isCurrentTurn ? 'active-turn' : ''}" style="${isMe ? 'border-style: dashed; background:#131e31;' : ''}">
                     <strong style="font-size:0.8rem; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${p.name} ${isMe ? '(You)' : ''}</strong>
@@ -144,7 +164,7 @@ socket.on('state_update', (state) => {
 
 socket.on('room_update', (namesArray) => {
     const lobbyList = document.getElementById('lobby-players-list');
-    lobbyList.innerHTML = namesArray.length === 0 ? `<li>Empty...</li>` : namesArray.map(name => `<li>🟢 ${name}</li>`).join('');
+    lobbyList.innerHTML = namesArray.length === 0 ? `<li>Empty...</li>` : namesArray.map(name => `<li>👥 ${name}</li>`).join('');
 });
 
 socket.on('update_chat', (history) => {
@@ -172,7 +192,15 @@ socket.on('error_message', (msg) => { alert(msg); });
 function joinLobby() {
     initAudio();
     const name = document.getElementById('username-input').value;
-    if(name.trim()) socket.emit('join_game', name.trim());
+    const roomInput = document.getElementById('room-input');
+    const roomName = roomInput ? roomInput.value : "default_arena";
+    
+    if(name.trim()) {
+        socket.emit('join_game', {
+            name: name.trim(),
+            room: roomName.trim()
+        });
+    }
 }
 function sendChatMessage() {
     const input = document.getElementById('chat-input');
@@ -186,10 +214,10 @@ function submitAsk() {
 function drawFromDeck() { socket.emit('draw_from_deck'); }
 function triggerManualFold() { socket.emit('manual_fold_check'); }
 function triggerExit() { socket.emit('leave_game'); }
-function respondGive() { socket.emit('resolve_request', { ...activeRequest, action: 'give' }); document.getElementById('request-modal').style.display = 'none'; }
-function respondFish() { socket.emit('resolve_request', { ...activeRequest, action: 'fish' }); document.getElementById('request-modal').style.display = 'none'; }
 function triggerRestart() {
     if (confirm("Are you sure you want to restart the match for everyone?")) {
         socket.emit('restart_game');
     }
 }
+function respondGive() { socket.emit('resolve_request', { ...activeRequest, action: 'give' }); document.getElementById('request-modal').style.display = 'none'; }
+function respondFish() { socket.emit('resolve_request', { ...activeRequest, action: 'fish' }); document.getElementById('request-modal').style.display = 'none'; }

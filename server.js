@@ -44,7 +44,8 @@ function getCleanStateForPlayer(roomName, socketId) {
         gameStarted: room.gameStarted,
         deckCount: room.deck.length,
         currentTurnIndex: room.currentTurnIndex,
-        isYourTurn: room.players[room.currentTurnIndex]?.id === socketId,
+        isYourTurn: room.players[room.currentTurnIndex]?.id === socketId && !room.awaitingFishDraw,
+        awaitingFishDraw: room.awaitingFishDraw && room.players[room.currentTurnIndex]?.id === socketId,
         yourHand: targetPlayer ? targetPlayer.hand : [],
         log: room.log,
         players: room.players.map(p => ({
@@ -96,7 +97,7 @@ io.on('connection', (socket) => {
                 gameStarted: false,
                 log: [],
                 chatHistory: [],
-                awaitingFishDraw: false // Track if active player must draw and pass
+                awaitingFishDraw: false 
             };
         }
 
@@ -107,7 +108,7 @@ io.on('connection', (socket) => {
             return;
         }
         if (room.players.length >= 6) {
-            socket.emit('error_message', "This room is full (Max 6 players).");
+            socket.emit('error_message', "This room is full.");
             return;
         }
 
@@ -162,17 +163,17 @@ io.on('connection', (socket) => {
         const activePlayer = room.players[room.currentTurnIndex];
         if (!activePlayer || activePlayer.id !== socket.id) return;
         if (room.awaitingFishDraw) {
-            socket.emit('error_message', "You must draw from the deck first!");
+            socket.emit('error_message', "You must draw your card from the deck pile first!");
             return;
         }
 
         const targetPlayer = room.players.find(p => p.id === data.targetId);
         if (!targetPlayer) return;
 
-        // RULE 2: Broadcast the asking card status openly to everyone's active log
+        // RULE 2: Shown openly to everyone in the live server log
         room.log.push({ 
             id: Date.now(), 
-            text: `👀 ${activePlayer.name} asked ${targetPlayer.name} for a [ ${data.rank} ]` 
+            text: `📢 ${activePlayer.name} asked ${targetPlayer.name} for a [ ${data.rank} ]` 
         });
 
         io.to(targetPlayer.id).emit('card_requested', {
@@ -198,16 +199,15 @@ io.on('connection', (socket) => {
             if (cardIndex !== -1) {
                 const card = targetPlayer.hand.splice(cardIndex, 1)[0];
                 askerPlayer.hand.push(card);
-                room.log.push({ id: Date.now(), text: `✅ Card Handover! ${targetPlayer.name} given a [ ${data.rank} ] to ${askerPlayer.name}.` });
+                room.log.push({ id: Date.now(), text: `✅ Success! ${targetPlayer.name} handed a [ ${data.rank} ] to ${askerPlayer.name}.` });
                 io.to(currentRoom).emit('sound_trigger', 'success');
-                // Asker successfully guessed! They get to go again, no turn advancement.
             }
         } else if (data.action === 'fish') {
-            // RULE 1: Target player says Go Fish!
-            room.log.push({ id: Date.now(), text: `🌊 "Go Fish!" — ${targetPlayer.name} does not have it.` });
+            // RULE 1: Player says Go Fish!
+            room.log.push({ id: Date.now(), text: `🌊 "Go Fish!" — ${targetPlayer.name} does not hold that rank.` });
             io.to(currentRoom).emit('sound_trigger', 'fish');
             
-            // Flag that the active player must draw a card to conclude their sequence
+            // Set flag: locks asking abilities, player MUST click deck
             room.awaitingFishDraw = true;
         }
 
@@ -224,18 +224,17 @@ io.on('connection', (socket) => {
         if (room.deck.length > 0) {
             const card = room.deck.pop();
             activePlayer.hand.push(card);
-            room.log.push({ id: Date.now(), text: `🎴 ${activePlayer.name} drew a card from the deck.` });
+            room.log.push({ id: Date.now(), text: `🎴 ${activePlayer.name} drew a card from the deck pile.` });
             
-            // RULE 1 & 3: If drawing as a consequence of a Go Fish call, pass the turn instantly
+            // RULE 1 & 3: Turn finishes instantly upon picking up the card
             if (room.awaitingFishDraw) {
                 room.awaitingFishDraw = false;
                 room.currentTurnIndex = (room.currentTurnIndex + 1) % room.players.length;
-                room.log.push({ id: Date.now(), text: `⏱️ Turn concluded. Next player's turn.` });
+                room.log.push({ id: Date.now(), text: `⏱️ Turn finishes. Next player's turn.` });
             }
-            
             broadcastRoomState(currentRoom);
         } else {
-            // If deck is empty when forced to draw, skip turn anyway
+            // Edge case: if deck is empty, skip turn anyway
             if (room.awaitingFishDraw) {
                 room.awaitingFishDraw = false;
                 room.currentTurnIndex = (room.currentTurnIndex + 1) % room.players.length;
