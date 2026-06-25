@@ -11,7 +11,7 @@
         h1 { text-align: center; font-size: 1.5rem; margin-bottom: 5px; }
         .section { background: #334155; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         .opponents-grid { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 5px; }
-        .opponent-card { border: 2px solid #64748b; padding: 10px; border-radius: 6px; min-width: 110px; text-align: center; }
+        .opponent-card { border: 2px solid #64748b; padding: 10px; border-radius: 6px; min-width: 110px; text-align: center; background: #1e293b; }
         .active-turn { border-color: #10b981; background: #064e3b; }
         .hand-flex { display: flex; gap: 8px; overflow-x: auto; padding: 10px 0; }
         .card { background: white; color: black; border-radius: 6px; padding: 15px 10px; font-weight: bold; font-size: 1.2rem; text-align: center; min-width: 60px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
@@ -23,7 +23,7 @@
         button:disabled { background: #475569; cursor: not-allowed; opacity: 0.6; }
         
         /* Interactive Notification Modal */
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); justify-content: center; align-items: center; z-index: 1000; padding: 20px; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; z-index: 1000; padding: 20px; }
         .modal-content { background: #1e293b; border: 3px solid #3b82f6; padding: 20px; border-radius: 12px; max-width: 400px; width: 100%; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
         .modal h3 { margin-bottom: 15px; color: #f8fafc; font-size: 1.25rem; }
         .modal-btns { display: flex; gap: 10px; margin-top: 20px; }
@@ -43,10 +43,19 @@
         <div id="lobby-view" class="section">
             <input type="text" id="username-input" placeholder="Enter Nickname" style="padding:10px; width:100%; border-radius:6px; margin-bottom:10px; color:black;">
             <button onclick="joinLobby()" style="margin-bottom:10px;">Join Lobby</button>
-            <button onclick="socket.emit('start_game')" style="background:#10b981;">Start Game (Needs 4+ Players)</button>
+            
+            <!-- Real-time Connected List display panel -->
+            <div id="waiting-room" style="background: #1e293b; padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px dashed #475569;">
+                <strong style="color: #cbd5e1; font-size: 0.9rem;">Players in Lobby:</strong>
+                <ul id="lobby-players-list" style="list-style: none; padding: 5px 0 0 0; color: #10b981; font-weight: bold; font-size: 0.95rem;">
+                    <li>Waiting for players to connect...</li>
+                </ul>
+            </div>
+            
+            <button onclick="socket.emit('start_game')" style="background:#10b981;">Start Game (Needs 2+ Players)</button>
         </div>
 
-        <!-- Main Game Board -->
+        <!-- Main Game Board (Single Screen Mobile Friendly Layout) -->
         <div id="game-view" class="section" style="display:none;">
             <h3>Opponents</h3>
             <div class="opponents-grid" id="opponents-list"></div>
@@ -55,8 +64,8 @@
             
             <div class="controls">
                 <h3>Your Turn Actions</h3>
-                <label>Target Player:</label> <select id="target-player-select"></select>
-                <label>Rank:</label> <select id="target-rank-select"></select>
+                <label>Target Player:</label> <select id="target-player-select" style="color:black;"></select>
+                <label>Rank:</label> <select id="target-rank-select" style="color:black;"></select>
                 <button id="ask-btn" onclick="submitAsk()">Ask For Card</button>
             </div>
 
@@ -78,7 +87,7 @@
         </div>
     </div>
 
-    <!-- Turn Request Modal Pop-Up -->
+    <!-- Turn Request Modal Pop-Up Notification -->
     <div id="request-modal" class="modal">
         <div class="modal-content">
             <h3 id="request-message">Player is asking you for a card!</h3>

@@ -75,7 +75,6 @@ function broadcastState() {
 
 io.on('connection', (socket) => {
     socket.on('join_game', (name) => {
-        // Support frontend payloads structured as string primitives OR nested target objects
         const actualName = (typeof name === 'object' && name !== null) ? name.name : name;
 
         if (gameState.gameStarted || gameState.players.length >= 6) {
@@ -88,8 +87,9 @@ io.on('connection', (socket) => {
     });
 
     socket.on('start_game', () => {
-        if (gameState.players.length < 4) {
-            socket.emit('error_message', "Need at least 4 players to start.");
+        // Lowered from 4 to 2 players for easier testing!
+        if (gameState.players.length < 2) {
+            socket.emit('error_message', "Need at least 2 players to start.");
             return;
         }
         gameState.deck = createAndShuffleDeck();
@@ -102,7 +102,6 @@ io.on('connection', (socket) => {
         broadcastState();
     });
 
-    // Modified: Instead of executing instantly, send an active pop-up notification challenge to the target
     socket.on('ask_card', ({ targetId, rank }) => {
         const currentPlayer = gameState.players[gameState.currentTurnIndex];
         if (socket.id !== currentPlayer.id) return;
@@ -110,7 +109,6 @@ io.on('connection', (socket) => {
         const targetPlayer = gameState.players.find(p => p.id === targetId);
         if (!targetPlayer) return;
 
-        // Broadcast the event to fire up the interactive pop-up component on the targeted player's display
         io.emit('card_requested', {
             targetId: targetId,
             rank: rank,
@@ -119,7 +117,6 @@ io.on('connection', (socket) => {
         });
     });
 
-    // Added: Listen for the targeted player's explicit interactive confirmation selection
     socket.on('resolve_request', ({ targetId, rank, askerId, action }) => {
         const currentPlayer = gameState.players.find(p => p.id === askerId);
         const targetPlayer = gameState.players.find(p => p.id === targetId);
@@ -127,14 +124,12 @@ io.on('connection', (socket) => {
         if (!currentPlayer || !targetPlayer) return;
 
         if (action === 'give') {
-            // Take ALL matching cards of that specific rank from their hand
             const cardsToMove = targetPlayer.hand.filter(c => c.rank === rank);
             targetPlayer.hand = targetPlayer.hand.filter(c => c.rank !== rank);
             currentPlayer.hand.push(...cardsToMove);
 
             addToLog(`${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s and received ${cardsToMove.length} card(s).`);
             checkForFolds(currentPlayer);
-            // Turn stays with the current player since they successfully guessed right!
         } else if (action === 'fish') {
             addToLog(`${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s. Go Fish!`);
             if (gameState.deck.length > 0) {
@@ -142,7 +137,6 @@ io.on('connection', (socket) => {
                 currentPlayer.hand.push(drawnCard);
             }
             checkForFolds(currentPlayer);
-            // Move the active turn state tracker forward to the next index slot
             gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
         }
 
