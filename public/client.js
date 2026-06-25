@@ -11,7 +11,7 @@ socket.on('state_update', (state) => {
 
     currentHand = state.yourHand || [];
     
-    // Render hand cards with responsive CSS multiline flexbox wrap tracking active
+    // Render hand cards
     const handDiv = document.getElementById('your-hand');
     handDiv.innerHTML = currentHand.map(c => {
         const isRed = c.suit === '♥' || c.suit === '♦';
@@ -31,11 +31,29 @@ socket.on('state_update', (state) => {
 
     document.getElementById('ask-btn').disabled = !state.isYourTurn;
 
-    // Render dynamic turn completion text strings down into historical logs column box
+    // ⏱️ UPDATED: Render the log lines and set up individual 10-second self-destruct timers
     const historyBox = document.getElementById('history-log-box');
-    historyBox.innerHTML = (state.log || []).map(line => `
-        <div class="log-line">${line}</div>
-    `).join('');
+    historyBox.innerHTML = ''; // Clear box first to handle incoming updates safely
+
+    (state.log || []).forEach((line, index) => {
+        // Create a unique container for this specific log line
+        const logLineElement = document.createElement('div');
+        logLineElement.className = 'log-line';
+        logLineElement.innerText = line;
+        historyBox.appendChild(logLineElement);
+
+        // Start a 10-second (10000ms) countdown to fade out and delete this specific line
+        setTimeout(() => {
+            logLineElement.style.transition = 'opacity 0.5s ease';
+            logLineElement.style.opacity = '0';
+            setTimeout(() => {
+                if (logLineElement.parentNode === historyBox) {
+                    historyBox.removeChild(logLineElement);
+                }
+            }, 500); // Wait for fade-out animation to complete before removing from DOM
+        }, 10000);
+    });
+    
     historyBox.scrollTop = historyBox.scrollHeight;
 
     const oppList = document.getElementById('opponents-list');
@@ -67,7 +85,6 @@ socket.on('card_requested', (data) => {
     
     const holdsCard = currentHand.some(card => card.rank === data.rank);
     
-    // Verification Protection: Disable Go Fish if they are lying and hold the card
     document.getElementById('modal-fish-btn').disabled = holdsCard;
     document.getElementById('modal-give-btn').disabled = !holdsCard;
     
