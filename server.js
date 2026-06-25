@@ -75,12 +75,15 @@ function broadcastState() {
 
 io.on('connection', (socket) => {
     socket.on('join_game', (name) => {
+        // Support frontend payloads structured as string primitives OR nested target objects
+        const actualName = (typeof name === 'object' && name !== null) ? name.name : name;
+
         if (gameState.gameStarted || gameState.players.length >= 6) {
             socket.emit('error_message', "Game full or already started.");
             return;
         }
-        gameState.players.push({ id: socket.id, name: name || `Player ${gameState.players.length + 1}`, hand: [], folds: 0 });
-        addToLog(`${name || socket.id} joined the room.`);
+        gameState.players.push({ id: socket.id, name: actualName || `Player ${gameState.players.length + 1}`, hand: [], folds: 0 });
+        addToLog(`${actualName || socket.id} joined the room.`);
         io.emit('room_update', gameState.players.map(p => p.name));
     });
 
@@ -99,6 +102,7 @@ io.on('connection', (socket) => {
         broadcastState();
     });
 
+    // Modified: Instead of executing instantly, send an active pop-up notification challenge to the target
     socket.on('ask_card', ({ targetId, rank }) => {
         const currentPlayer = gameState.players[gameState.currentTurnIndex];
         if (socket.id !== currentPlayer.id) return;
@@ -106,22 +110,42 @@ io.on('connection', (socket) => {
         const targetPlayer = gameState.players.find(p => p.id === targetId);
         if (!targetPlayer) return;
 
-        const cardIndex = targetPlayer.hand.findIndex(c => c.rank === rank);
+        // Broadcast the event to fire up the interactive pop-up component on the targeted player's display
+        io.emit('card_requested', {
+            targetId: targetId,
+            rank: rank,
+            askerId: currentPlayer.id,
+            askerName: currentPlayer.name
+        });
+    });
 
-        if (cardIndex !== -1) {
-            const [transferredCard] = targetPlayer.hand.splice(cardIndex, 1);
-            currentPlayer.hand.push(transferredCard);
-            addToLog(`${currentPlayer.name} asked ${targetPlayer.name} for a ${rank} and took ONE.`);
+    // Added: Listen for the targeted player's explicit interactive confirmation selection
+    socket.on('resolve_request', ({ targetId, rank, askerId, action }) => {
+        const currentPlayer = gameState.players.find(p => p.id === askerId);
+        const targetPlayer = gameState.players.find(p => p.id === targetId);
+
+        if (!currentPlayer || !targetPlayer) return;
+
+        if (action === 'give') {
+            // Take ALL matching cards of that specific rank from their hand
+            const cardsToMove = targetPlayer.hand.filter(c => c.rank === rank);
+            targetPlayer.hand = targetPlayer.hand.filter(c => c.rank !== rank);
+            currentPlayer.hand.push(...cardsToMove);
+
+            addToLog(`${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s and received ${cardsToMove.length} card(s).`);
             checkForFolds(currentPlayer);
-        } else {
-            addToLog(`${currentPlayer.name} asked ${targetPlayer.name} for a ${rank}. Go Fish!`);
+            // Turn stays with the current player since they successfully guessed right!
+        } else if (action === 'fish') {
+            addToLog(`${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s. Go Fish!`);
             if (gameState.deck.length > 0) {
                 const drawnCard = gameState.deck.pop();
                 currentPlayer.hand.push(drawnCard);
             }
             checkForFolds(currentPlayer);
+            // Move the active turn state tracker forward to the next index slot
             gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
         }
+
         broadcastState();
     });
 
@@ -146,6 +170,5 @@ io.on('connection', (socket) => {
     });
 });
 
-// Render dynamic port deployment configuration
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
