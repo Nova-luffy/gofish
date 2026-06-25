@@ -188,3 +188,8 @@ function triggerManualFold() { socket.emit('manual_fold_check'); }
 function triggerExit() { socket.emit('leave_game'); }
 function respondGive() { socket.emit('resolve_request', { ...activeRequest, action: 'give' }); document.getElementById('request-modal').style.display = 'none'; }
 function respondFish() { socket.emit('resolve_request', { ...activeRequest, action: 'fish' }); document.getElementById('request-modal').style.display = 'none'; }
+function triggerRestart() {
+    if (confirm("Are you sure you want to restart the match for everyone?")) {
+        socket.emit('restart_game');
+    }
+}
