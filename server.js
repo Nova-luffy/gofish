@@ -93,8 +93,10 @@ io.on('connection', (socket) => {
         });
         addToLog(`${actualName || socket.id} joined the room.`);
         io.emit('room_update', gameState.players.map(p => p.name));
-        
-        // Notify existing voice members to handshake with this new user
+    });
+
+    socket.on('voice_ready_handshake', () => {
+        // Trigger other users to begin handshaking now that this individual's mic is active
         socket.broadcast.emit('voice_user_joined', socket.id);
     });
 
@@ -116,7 +118,6 @@ io.on('connection', (socket) => {
         broadcastState();
     });
 
-    // 🚪 1. GLOBAL EXIT RULE: Kicks everyone back to the lobby page instantly on execution
     socket.on('leave_game', () => {
         gameState.players = [];
         gameState.deck = [];
@@ -127,11 +128,19 @@ io.on('connection', (socket) => {
         io.emit('room_update', []);
     });
 
-    // 🎙️ 2. WebRTC Audio Signaling Relay Engine Mesh 
+    // 🎙️ WebRTC Voice SDP Relay Matrix
     socket.on('voice_signal', ({ targetId, signal }) => {
         io.to(targetId).emit('voice_signal_received', {
             senderId: socket.id,
             signal: signal
+        });
+    });
+
+    // 🎙️ WebRTC Network ICE Candidate Relay
+    socket.on('voice_ice_candidate', ({ targetId, candidate }) => {
+        io.to(targetId).emit('voice_ice_candidate', {
+            senderId: socket.id,
+            candidate: candidate
         });
     });
 

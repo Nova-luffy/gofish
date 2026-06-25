@@ -7,6 +7,7 @@ let activeRequest = null;
 let localStream = null;
 let peerConnections = {}; 
 const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19002' }] };
+let voiceMode = 'mute'; // Options: 'open', 'ptt', 'mute'
 
 socket.on('state_update', (state) => {
     myId = socket.id;
@@ -77,9 +78,7 @@ socket.on('room_update', (namesArray) => {
     }
 });
 
-// 🚪 GLOBAL LOGOUT BROADCAST ROUTING HANDLE
 socket.on('global_logout_forced', () => {
-    // Shutdown local audio hardware tracks safely
     if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
     }
@@ -102,30 +101,107 @@ socket.on('card_requested', (data) => {
 
 socket.on('error_message', (msg) => { alert(msg); });
 
-// 🎙️ WebRTC Voice Processing Infrastructure Mechanics Engine Handles
-async function initiateVoiceChat() {
-    if (localStream) return; // Prevent double connection instances
+// ==========================================
+// 🎙️ WebRTC Voice Modes & Control Systems
+// ==========================================
 
-    try {
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        const btn = document.getElementById('voice-toggle-btn');
-        btn.innerText = "🎙️ Voice Chat Connected Live";
-        btn.classList.add('connected');
+async function ensureAudioStream() {
+    if (!localStream) {
+        try {
+            localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            // Default initialization sets mic to muted state
+            setLocalAudioTrackState(false);
+            socket.emit('voice_ready_handshake');
+        } catch (err) {
+            alert("Audio Microphone permission blocked or unsupported over unsecure connections!");
+            return false;
+        }
+    }
+    return true;
+}
 
-        // Request signaling handshakes with all connected session nodes
-        socket.emit('voice_ready_handshake');
-    } catch (err) {
-        alert("Audio Mic permission initialization blocked or unsupported over non-HTTPS!");
+function setLocalAudioTrackState(enabled) {
+    if (localStream) {
+        localStream.getAudioTracks().forEach(track => {
+            track.enabled = enabled;
+        });
     }
 }
 
+async function setVoiceMode(mode) {
+    const streamActive = await ensureAudioStream();
+    if (!streamActive) return;
+
+    voiceMode = mode;
+    updateVoiceUI();
+
+    if (voiceMode === 'open') {
+        setLocalAudioTrackState(true);
+    } else {
+        // Both 'ptt' and 'mute' turn the audio track off until explicitly activated
+        setLocalAudioTrackState(false);
+    }
+}
+
+// Push To Talk Event Triggers
+async function startPTT() {
+    if (voiceMode !== 'ptt') return;
+    const streamActive = await ensureAudioStream();
+    if (streamActive) {
+        setLocalAudioTrackState(true);
+        document.getElementById('voice-status-indicator').innerText = "🎙️ PTT Broad Casting... (TALKING)";
+    }
+}
+
+function stopPTT() {
+    if (voiceMode !== 'ptt') return;
+    setLocalAudioTrackState(false);
+    document.getElementById('voice-status-indicator').innerText = "🎙️ PTT Engaged (Hold Space/Button to talk)";
+}
+
+function updateVoiceUI() {
+    const statusBox = document.getElementById('voice-status-indicator');
+    if (!statusBox) return;
+
+    if (voiceMode === 'open') {
+        statusBox.innerText = "🔊 Open Mic: Live Speaking Room";
+        statusBox.style.color = "#22c55e";
+    } else if (voiceMode === 'ptt') {
+        statusBox.innerText = "🎙️ PTT Engaged (Hold Space/Button to talk)";
+        statusBox.style.color = "#eab308";
+    } else {
+        statusBox.innerText = "🔇 Voice Muted / Closed";
+        statusBox.style.color = "#ef4444";
+    }
+}
+
+// Global Keybind listeners for Push-To-Talk via Spacebar
+window.addEventListener('keydown', (e) => {
+    // Prevent activation if typing in an input field
+    if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT') return;
+    if (e.code === 'Space') {
+        e.preventDefault(); 
+        startPTT();
+    }
+});
+
+window.addEventListener('keyup', (e) => {
+    if (e.code === 'Space') {
+        stopPTT();
+    }
+});
+
+// ==========================================
+// ⚡ WebRTC Mesh Signaling Mechanics
+// ==========================================
+
 socket.on('voice_user_joined', async (userId) => {
-    if (!localStream) return;
+    await ensureAudioStream();
     createPeerConnection(userId, true);
 });
 
 socket.on('voice_signal_received', async ({ senderId, signal }) => {
-    if (!localStream) return;
+    await ensureAudioStream();
     if (!peerConnections[senderId]) {
         createPeerConnection(senderId, false);
     }
@@ -137,15 +213,27 @@ socket.on('voice_signal_received', async ({ senderId, signal }) => {
     }
 });
 
+socket.on('voice_ice_candidate', async ({ senderId, candidate }) => {
+    if (peerConnections[senderId] && candidate) {
+        try {
+            await peerConnections[senderId].addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (e) {
+            console.error("Error adding received ICE candidate", e);
+        }
+    }
+});
+
 function createPeerConnection(targetId, isOffer) {
     const pc = new RTCPeerConnection(rtcConfig);
     peerConnections[targetId] = pc;
 
-    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    if (localStream) {
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    }
 
     pc.onicecandidate = (event) => {
         if (event.candidate) {
-            // Wait for gathering to stabilize or transfer via offer parameters natively
+            socket.emit('voice_ice_candidate', { targetId, candidate: event.candidate });
         }
     };
 
@@ -155,20 +243,26 @@ function createPeerConnection(targetId, isOffer) {
             audioEl = document.createElement('audio');
             audioEl.id = `audio-${targetId}`;
             audioEl.autoplay = true;
-            document.getElementById('remote-audio-streams-container').appendChild(audioEl);
+            const container = document.getElementById('remote-audio-streams-container');
+            if (container) container.appendChild(audioEl);
         }
         audioEl.srcObject = event.streams[0];
     };
 
     if (isOffer) {
         pc.onnegotiationneeded = async () => {
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            socket.emit('voice_signal', { targetId, signal: offer });
+            try {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                socket.emit('voice_signal', { targetId, signal: offer });
+            } catch (err) {
+                console.error(err);
+            }
         };
     }
 }
 
+// Socket Room Hooks
 function joinLobby() {
     const name = document.getElementById('username-input').value;
     if(name) { socket.emit('join_game', name); } else { alert("Please enter a nickname!"); }
