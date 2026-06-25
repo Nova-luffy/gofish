@@ -7,6 +7,14 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+// 🛡️ ENFORCE HTTPS REDIRECT FOR DEPLOYMENTS (Render Load Balancer Rule)
+app.use((req, res, next) => {
+    if (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-proto'] !== 'https') {
+        return res.redirect(`https://${req.headers.host}${req.url}`);
+    }
+    next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 let gameState = {
