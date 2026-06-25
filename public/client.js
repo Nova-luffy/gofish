@@ -2,9 +2,8 @@ const socket = io(window.location.origin);
 let myId = null;
 let currentHand = [];
 let activeRequest = null;
-let audioCtx = null; // Lazy instantiated browser audio architecture track runtime references
+let audioCtx = null;
 
-// 🎹 Arcade Video Game Synth Sound Engine Block 
 function initAudio() {
     if (!audioCtx) {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -21,7 +20,7 @@ function playSynthTone(freq, type, duration, delay = 0) {
             osc.type = type;
             osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
             
-            gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
+            gainNode.gain.setValueAtTime(0.12, audioCtx.currentTime);
             gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
             
             osc.connect(gainNode);
@@ -29,7 +28,7 @@ function playSynthTone(freq, type, duration, delay = 0) {
             
             osc.start();
             osc.stop(audioCtx.currentTime + duration);
-        } catch(e) { console.log("Audio node dropped play", e); }
+        } catch(e) {}
     }, delay);
 }
 
@@ -38,25 +37,24 @@ function playSoundEffect(type) {
     if (!audioCtx) return;
     
     if (type === 'chat') {
-        playSynthTone(600, 'sine', 0.08);
+        playSynthTone(587.33, 'sine', 0.08);
     } else if (type === 'draw') {
-        playSynthTone(350, 'triangle', 0.1);
-        playSynthTone(450, 'triangle', 0.12, 60);
+        playSynthTone(293.66, 'triangle', 0.08);
+        playSynthTone(392.00, 'triangle', 0.1, 50);
     } else if (type === 'success') {
-        playSynthTone(523.25, 'square', 0.1); // C5
-        playSynthTone(659.25, 'square', 0.1, 80); // E5
-        playSynthTone(783.99, 'square', 0.15, 160); // G5
+        playSynthTone(523.25, 'square', 0.08);
+        playSynthTone(659.25, 'square', 0.08, 60);
+        playSynthTone(783.99, 'square', 0.12, 120);
     } else if (type === 'fish') {
-        playSynthTone(220, 'sawtooth', 0.2);
-        playSynthTone(180, 'sawtooth', 0.25, 100);
+        playSynthTone(220, 'sawtooth', 0.18);
+        playSynthTone(174.61, 'sawtooth', 0.22, 80);
     } else if (type === 'fold') {
-        playSynthTone(440, 'sine', 0.08);
-        playSynthTone(880, 'sine', 0.08, 50);
-        playSynthTone(1760, 'sine', 0.15, 100);
+        playSynthTone(440, 'sine', 0.06);
+        playSynthTone(659.25, 'sine', 0.06, 40);
+        playSynthTone(880, 'sine', 0.12, 80);
     }
 }
 
-// Socket Processing Interfaces
 socket.on('state_update', (state) => {
     myId = socket.id;
     
@@ -69,13 +67,11 @@ socket.on('state_update', (state) => {
     document.getElementById('lobby-view').style.display = 'none';
     document.getElementById('game-view').style.display = 'block';
 
-    // Verify if player received new cards to flash a layout render pop sound
     if (state.yourHand && state.yourHand.length !== currentHand.length) {
         playSoundEffect('draw');
     }
 
     currentHand = state.yourHand || [];
-    
     const rankCounts = {};
     currentHand.forEach(c => { rankCounts[c.rank] = (rankCounts[c.rank] || 0) + 1; });
 
@@ -83,9 +79,38 @@ socket.on('state_update', (state) => {
     handDiv.innerHTML = currentHand.map((c, idx) => {
         const isRed = c.suit === '♥' || c.suit === '♦';
         const isQuad = rankCounts[c.rank] === 4;
-        // Injected staggered CSS delay mechanics to create systematic cascade fan animation layout effects
-        return `<div class="card ${isRed ? 'red' : ''} ${isQuad ? 'quad-highlight' : ''}" style="animation-delay: ${idx * 0.05}s">${c.rank}<br>${c.suit}</div>`;
+        return `
+            <div class="playing-card ${isRed ? 'red' : ''} ${isQuad ? 'quad-highlight' : ''}" style="animation-delay: ${idx * 0.08}s">
+                <div class="card-corner top-left">
+                    <span class="rank">${c.rank}</span>
+                    <span class="suit">${c.suit}</span>
+                </div>
+                <div class="card-center-suit">${c.suit}</div>
+                <div class="card-corner bottom-right">
+                    <span class="rank">${c.rank}</span>
+                    <span class="suit">${c.suit}</span>
+                </div>
+            </div>
+        `;
     }).join('');
+
+    const deckCount = state.deckCount || 0;
+    document.getElementById('deck-count-text').innerText = `${deckCount} Cards`;
+    const visualDeckStack = document.getElementById('deck-visual-stack-target');
+    visualDeckStack.innerHTML = '';
+    
+    if (deckCount > 0) {
+        let layeredShadows = '';
+        const structuralLayersCount = Math.min(Math.ceil(deckCount / 4), 10);
+        for(let i = 1; i <= structuralLayersCount; i++) {
+            layeredShadows += `${i}px ${i}px 0px #7f1d1d, `;
+        }
+        layeredShadows += `${structuralLayersCount+2}px ${structuralLayersCount+2}px 8px rgba(0,0,0,0.6)`;
+        
+        visualDeckStack.innerHTML = `<div class="deck-stack-card" style="box-shadow: ${layeredShadows}">🐟</div>`;
+    } else {
+        visualDeckStack.innerHTML = `<div class="deck-stack-card" style="background:#1e293b; border:2px dashed #475569; box-shadow:none; color:#475569;">EMPTY</div>`;
+    }
 
     const oppSelect = document.getElementById('target-player-select');
     oppSelect.innerHTML = state.players
@@ -108,15 +133,14 @@ socket.on('state_update', (state) => {
     oppList.innerHTML = state.players
         .map(p => {
             const isMe = p.id === myId;
-            const foldBadgesHTML = (p.foldedRanks || []).map(r => `<span class="fold-badge">🎁 ${r}</span>`).join(' ');
+            const foldBadgesHTML = (p.foldedRanks || []).map(r => `<span class="fold-badge">🎁 Set ${r}</span>`).join(' ');
 
             return `
-                <div class="opponent-card ${p.isCurrentTurn ? 'active-turn' : ''}" style="${isMe ? 'border-style: dashed; background:#1e293b;' : ''}">
-                    <strong>${p.name} ${isMe ? '(You)' : ''}</strong><br>
-                    <span style="font-size:0.85rem; color:#94a3b8;">Cards: ${p.cardCount}</span><br>
-                    <span style="font-size:0.85rem; color:#10b981;">Sets: ${p.folds || 0}</span>
-                    <div style="margin-top: 5px; min-height:20px;">
-                        ${foldBadgesHTML || '<span style="font-size:0.7rem; color:#475569;">No sets folded</span>'}
+                <div class="opponent-card ${p.isCurrentTurn ? 'active-turn' : ''}" style="${isMe ? 'border-style: dashed; background:#131e31;' : ''}">
+                    <strong style="font-size:0.9rem;">${p.name} ${isMe ? '(You)' : ''}</strong><br>
+                    <span style="font-size:0.8rem; opacity:0.85;">Cards: ${p.cardCount}</span><br>
+                    <div style="margin-top: 4px; min-height:18px;">
+                        ${foldBadgesHTML || '<span style="font-size:0.68rem; color:#475569;">No folds</span>'}
                     </div>
                 </div>
             `;
@@ -135,26 +159,20 @@ socket.on('room_update', (namesArray) => {
 socket.on('update_chat', (history) => {
     const chatBox = document.getElementById('chat-box');
     chatBox.innerHTML = history.map(m => 
-        `<div class="chat-msg"><strong style="color:#3b82f6;">${m.name}:</strong> <span style="color:#f1f5f9;">${m.text}</span></div>`
+        `<div class="chat-msg"><strong style="color:#60a5fa;">${m.name}:</strong> <span style="color:#f8fafc;">${m.text}</span></div>`
     ).join('');
     chatBox.scrollTop = chatBox.scrollHeight;
     playSoundEffect('chat');
 });
 
-socket.on('sound_trigger', (soundType) => {
-    playSoundEffect(soundType);
-});
-
-socket.on('global_logout_forced', () => {
-    alert("Match terminated. Returned to lobby state pool parameters.");
-    location.reload(); 
-});
+socket.on('sound_trigger', (soundType) => { playSoundEffect(soundType); });
+socket.on('global_logout_forced', () => { location.reload(); });
 
 socket.on('card_requested', (data) => {
     if (data.targetId !== socket.id) return;
     
     activeRequest = data; 
-    document.getElementById('request-message').innerText = `${data.askerName} is asking you for: ${data.rank}'s`;
+    document.getElementById('request-message').innerText = `${data.askerName} is demanding ONE of your [ ${data.rank} ] cards!`;
     
     const holdsCard = currentHand.some(card => card.rank === data.rank);
     document.getElementById('modal-fish-btn').disabled = holdsCard;
@@ -165,9 +183,8 @@ socket.on('card_requested', (data) => {
 
 socket.on('error_message', (msg) => { alert(msg); });
 
-// Action Processing Module Functions
 function joinLobby() {
-    initAudio(); // Unblocks browser sound security policies safely on user interaction
+    initAudio();
     const name = document.getElementById('username-input').value;
     if(name.trim()) { socket.emit('join_game', name.trim()); } else { alert("Please enter a nickname!"); }
 }
@@ -183,7 +200,7 @@ function sendChatMessage() {
 function submitAsk() {
     const targetId = document.getElementById('target-player-select').value;
     const rank = document.getElementById('target-rank-select').value;
-    if(!targetId || !rank) return alert("Select a player and rank!");
+    if(!targetId || !rank) return alert("Select player node & rank!");
     socket.emit('ask_card', { targetId, rank });
 }
 

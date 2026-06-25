@@ -7,7 +7,6 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Force HTTPS on Render
 app.use((req, res, next) => {
     if (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-proto'] !== 'https') {
         return res.redirect(`https://${req.headers.host}${req.url}`);
@@ -58,7 +57,7 @@ function resetGameStructure() {
     });
     gameState.currentTurnIndex = 0;
     gameState.log = [];
-    addToLog("The match has officially begun! 🃏");
+    addToLog("The arena match has officially begun! 🃏");
 }
 
 function broadcastState() {
@@ -142,14 +141,23 @@ io.on('connection', (socket) => {
         if (!currentPlayer || !targetPlayer) return;
 
         if (action === 'give') {
-            const matchingCards = targetPlayer.hand.filter(c => c.rank === rank);
-            targetPlayer.hand = targetPlayer.hand.filter(c => c.rank !== rank);
-            currentPlayer.hand.push(...matchingCards);
-            addToLog(`🎯 ${currentPlayer.name} took ${matchingCards.length} [${rank}] card(s) from ${targetPlayer.name}!`);
-            io.emit('sound_trigger', 'success');
+            // Find the index of just ONE matching card
+            const cardIndex = targetPlayer.hand.findIndex(c => c.rank === rank);
+            
+            if (cardIndex !== -1) {
+                // Remove exactly ONE card from target and push to asker
+                const [movedCard] = targetPlayer.hand.splice(cardIndex, 1);
+                currentPlayer.hand.push(movedCard);
+                
+                addToLog(`🎯 ${currentPlayer.name} took exactly ONE [${rank}] card from ${targetPlayer.name}!`);
+                io.emit('sound_trigger', 'success');
+                // Note: It stays the currentPlayer's turn because they guessed correctly!
+            }
         } else if (action === 'fish') {
             addToLog(`🐟 ${currentPlayer.name} asked ${targetPlayer.name} for ${rank}s. Go Fish!`);
             io.emit('sound_trigger', 'fish');
+            // Turn automatically passes to the next player only on a Go Fish
+            gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
         }
         broadcastState();
     });
@@ -160,8 +168,9 @@ io.on('connection', (socket) => {
 
         const drawnCard = gameState.deck.pop();
         currentPlayer.hand.push(drawnCard);
-        addToLog(`🃏 ${currentPlayer.name} drew a card.`);
+        addToLog(`🃏 ${currentPlayer.name} drew a card from the deck.`);
 
+        // Turn passes to the next player after drawing
         gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
         io.emit('sound_trigger', 'draw');
         broadcastState();
@@ -186,7 +195,7 @@ io.on('connection', (socket) => {
         }
 
         if (foldedAny) {
-            addToLog(`🎁 ${player.name} completed and folded a set of ${4}s!`);
+            addToLog(`🎁 ${player.name} completed and folded a set of 4-of-a-kind!`);
             socket.emit('sound_trigger', 'fold');
         } else {
             socket.emit('error_message', "No 4-of-a-kind sets found to fold.");
@@ -213,4 +222,4 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server live on port ${PORT}`));
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
