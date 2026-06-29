@@ -7,7 +7,6 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Middleware for HTTPS redirect
 app.use((req, res, next) => {
     if (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-proto'] !== 'https') {
         return res.redirect(`https://${req.headers.host}${req.url}`);
@@ -17,16 +16,7 @@ app.use((req, res, next) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Global Game State
-let gameState = {
-    players: [],        
-    deck: [],           
-    currentTurnIndex: 0,
-    gameStarted: false,
-    log: [],
-    chatHistory: [],
-    awaitingFishDraw: false // Tracks if active player must draw to end their turn
-};
+let rooms = {};
 
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 const SUITS = ['♠', '♥', '♦', '♣'];
@@ -45,47 +35,86 @@ function createAndShuffleDeck() {
     return deck;
 }
 
-function addToLog(text) {
-    gameState.log.push({ id: Date.now(), text });
-    if (gameState.log.length > 45) gameState.log.shift();
+function getCleanStateForPlayer(roomName, socketId) {
+    const room = rooms[roomName];
+    if (!room) return {};
+
+    const targetPlayer = room.players.find(p => p.id === socketId);
+    return {
+        gameStarted: room.gameStarted,
+        deckCount: room.deck.length,
+        currentTurnIndex: room.currentTurnIndex,
+        isYourTurn: room.players[room.currentTurnIndex]?.id === socketId,
+        yourHand: targetPlayer ? targetPlayer.hand : [],
+        log: room.log,
+        players: room.players.map(p => ({
+            id: p.id,
+            name: p.name,
+            cardCount: p.hand.length,
+            foldedRanks: p.foldedRanks || [],
+            isCurrentTurn: room.players[room.currentTurnIndex]?.id === p.id
+        }))
+    };
 }
 
-function broadcastState() {
-    gameState.players.forEach((player) => {
-        io.to(player.id).emit('state_update', {
-            gameStarted: gameState.gameStarted,
-            deckCount: gameState.deck.length,
-            currentTurnIndex: gameState.currentTurnIndex,
-            // Disable normal actions if player needs to execute a fish draw sequence
-            isYourTurn: gameState.players[gameState.currentTurnIndex]?.id === player.id && !gameState.awaitingFishDraw,
-            // Alerts frontend that player is locked into drawing a card
-            awaitingFishDraw: gameState.awaitingFishDraw && gameState.players[gameState.currentTurnIndex]?.id === player.id,
-            yourHand: player.hand,
-            log: gameState.log,
-            players: gameState.players.map(p => ({
-                id: p.id,
-                name: p.name,
-                cardCount: p.hand.length,
-                foldedRanks: p.foldedRanks || [],
-                isCurrentTurn: gameState.players[gameState.currentTurnIndex]?.id === p.id
-            }))
-        });
+function broadcastRoomState(roomName) {
+    const room = rooms[roomName];
+    if (!room) return;
+    room.players.forEach(p => {
+        io.to(p.id).emit('state_update', getCleanStateForPlayer(roomName, p.id));
     });
 }
 
+function updateLobbyNames(roomName) {
+    const room = rooms[roomName];
+    if (!room) return;
+    const names = room.players.map(p => p.name);
+    io.to(roomName).emit('room_update', names);
+}
+
 io.on('connection', (socket) => {
+    let currentRoom = null;
 
-    socket.on('join_game', (name) => {
-        if (gameState.gameStarted) {
-            socket.emit('error_message', "The game has already started!");
+    socket.on('join_game', (data) => {
+        let name = "";
+        let roomName = "default_arena";
+
+        if (typeof data === 'object' && data !== null) {
+            name = data.name || "Anonymous";
+            roomName = data.room ? data.room.trim().toLowerCase() : "default_arena";
+        } else {
+            name = String(data);
+        }
+
+        if (!roomName) roomName = "default_arena";
+
+        if (!rooms[roomName]) {
+            rooms[roomName] = {
+                players: [],
+                deck: [],
+                currentTurnIndex: 0,
+                gameStarted: false,
+                log: [],
+                chatHistory: [],
+                awaitingFishDraw: false // Track if active player must draw and pass
+            };
+        }
+
+        const room = rooms[roomName];
+
+        if (room.gameStarted) {
+            socket.emit('error_message', "This arena match has already begun.");
             return;
         }
-        if (gameState.players.length >= 6) {
-            socket.emit('error_message', "Game lobby is full! (Max 6 players)");
+        if (room.players.length >= 6) {
+            socket.emit('error_message', "This room is full (Max 6 players).");
             return;
         }
 
-        gameState.players.push({
+        currentRoom = roomName;
+        socket.join(roomName);
+
+        room.players.push({
             id: socket.id,
             name: name,
             hand: [],
@@ -93,52 +122,58 @@ io.on('connection', (socket) => {
             foldedRanks: []
         });
 
-        socket.emit('update_chat', gameState.chatHistory);
-        
-        // Update lobby view user strings
-        const names = gameState.players.map(p => p.name);
-        io.emit('room_update', names);
-        broadcastState();
+        socket.emit('update_chat', room.chatHistory);
+        updateLobbyNames(roomName);
+        broadcastRoomState(roomName);
     });
 
     socket.on('start_game', () => {
-        if (gameState.players.length < 2) {
+        if (!currentRoom || !rooms[currentRoom]) return;
+        const room = rooms[currentRoom];
+
+        if (room.players.length < 2) {
             socket.emit('error_message', "Need at least 2 players to start.");
             return;
         }
 
-        gameState.deck = createAndShuffleDeck();
-        gameState.gameStarted = true;
-        gameState.currentTurnIndex = 0;
-        gameState.awaitingFishDraw = false;
-        gameState.log = [];
+        room.deck = createAndShuffleDeck();
+        room.gameStarted = true;
+        room.currentTurnIndex = 0;
+        room.awaitingFishDraw = false;
+        room.log = [];
 
-        for (let player of gameState.players) {
+        for (let player of room.players) {
             player.hand = [];
             player.folds = 0;
             player.foldedRanks = [];
             for (let i = 0; i < 5; i++) {
-                if (gameState.deck.length > 0) player.hand.push(gameState.deck.pop());
+                if (room.deck.length > 0) player.hand.push(room.deck.pop());
             }
         }
 
-        addToLog("⚔️ Arena match has begun! Good luck.");
-        broadcastState();
+        room.log.push({ id: Date.now(), text: "⚔️ Arena match has begun! Good luck." });
+        broadcastRoomState(currentRoom);
     });
 
     socket.on('ask_card', (data) => {
-        const activePlayer = gameState.players[gameState.currentTurnIndex];
+        if (!currentRoom || !rooms[currentRoom]) return;
+        const room = rooms[currentRoom];
+
+        const activePlayer = room.players[room.currentTurnIndex];
         if (!activePlayer || activePlayer.id !== socket.id) return;
-        if (gameState.awaitingFishDraw) {
+        if (room.awaitingFishDraw) {
             socket.emit('error_message', "You must draw from the deck first!");
             return;
         }
 
-        const targetPlayer = gameState.players.find(p => p.id === data.targetId);
+        const targetPlayer = room.players.find(p => p.id === data.targetId);
         if (!targetPlayer) return;
 
-        // --- RULE 2: Show every card request openly to everyone in the live game log ---
-        addToLog(`📢 ${activePlayer.name} asked ${targetPlayer.name} for a [ ${data.rank} ]`);
+        // RULE 2: Broadcast the asking card status openly to everyone's active log
+        room.log.push({ 
+            id: Date.now(), 
+            text: `👀 ${activePlayer.name} asked ${targetPlayer.name} for a [ ${data.rank} ]` 
+        });
 
         io.to(targetPlayer.id).emit('card_requested', {
             askerId: socket.id,
@@ -146,12 +181,16 @@ io.on('connection', (socket) => {
             rank: data.rank,
             targetId: targetPlayer.id
         });
-        broadcastState();
+        
+        broadcastRoomState(currentRoom);
     });
 
     socket.on('resolve_request', (data) => {
-        const targetPlayer = gameState.players.find(p => p.id === data.targetId);
-        const askerPlayer = gameState.players.find(p => p.id === data.askerId);
+        if (!currentRoom || !rooms[currentRoom]) return;
+        const room = rooms[currentRoom];
+
+        const targetPlayer = room.players.find(p => p.id === data.targetId);
+        const askerPlayer = room.players.find(p => p.id === data.askerId);
         if (!targetPlayer || !askerPlayer) return;
 
         if (data.action === 'give') {
@@ -159,48 +198,57 @@ io.on('connection', (socket) => {
             if (cardIndex !== -1) {
                 const card = targetPlayer.hand.splice(cardIndex, 1)[0];
                 askerPlayer.hand.push(card);
-                addToLog(`✅ Success! ${targetPlayer.name} handed a [ ${data.rank} ] to ${askerPlayer.name}.`);
-                io.emit('sound_trigger', 'success');
+                room.log.push({ id: Date.now(), text: `✅ Card Handover! ${targetPlayer.name} given a [ ${data.rank} ] to ${askerPlayer.name}.` });
+                io.to(currentRoom).emit('sound_trigger', 'success');
+                // Asker successfully guessed! They get to go again, no turn advancement.
             }
         } else if (data.action === 'fish') {
-            // --- RULE 1: Player2 doesn't have it and says "Go Fish" ---
-            addToLog(`🌊 "Go Fish!" — ${targetPlayer.name} does not have a [ ${data.rank} ].`);
-            io.emit('sound_trigger', 'fish');
+            // RULE 1: Target player says Go Fish!
+            room.log.push({ id: Date.now(), text: `🌊 "Go Fish!" — ${targetPlayer.name} does not have it.` });
+            io.to(currentRoom).emit('sound_trigger', 'fish');
             
-            // Set safety lock flag: active player is forced to click and draw from the deck next
-            gameState.awaitingFishDraw = true;
+            // Flag that the active player must draw a card to conclude their sequence
+            room.awaitingFishDraw = true;
         }
-        broadcastState();
+
+        broadcastRoomState(currentRoom);
     });
 
     socket.on('draw_from_deck', () => {
-        const activePlayer = gameState.players[gameState.currentTurnIndex];
+        if (!currentRoom || !rooms[currentRoom]) return;
+        const room = rooms[currentRoom];
+
+        const activePlayer = room.players[room.currentTurnIndex];
         if (!activePlayer || activePlayer.id !== socket.id) return;
 
-        if (gameState.deck.length > 0) {
-            const card = gameState.deck.pop();
+        if (room.deck.length > 0) {
+            const card = room.deck.pop();
             activePlayer.hand.push(card);
-            addToLog(`🎴 ${activePlayer.name} drew a card from the deck pile.`);
+            room.log.push({ id: Date.now(), text: `🎴 ${activePlayer.name} drew a card from the deck.` });
             
-            // --- RULE 1 & 3: Turn finishes instantly upon picking up the card ---
-            if (gameState.awaitingFishDraw) {
-                gameState.awaitingFishDraw = false;
-                gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
-                addToLog(`⏱️ Turn finished. Next player's turn.`);
+            // RULE 1 & 3: If drawing as a consequence of a Go Fish call, pass the turn instantly
+            if (room.awaitingFishDraw) {
+                room.awaitingFishDraw = false;
+                room.currentTurnIndex = (room.currentTurnIndex + 1) % room.players.length;
+                room.log.push({ id: Date.now(), text: `⏱️ Turn concluded. Next player's turn.` });
             }
-            broadcastState();
+            
+            broadcastRoomState(currentRoom);
         } else {
-            // Safe fallback if deck runs dry mid-turn execution
-            if (gameState.awaitingFishDraw) {
-                gameState.awaitingFishDraw = false;
-                gameState.currentTurnIndex = (gameState.currentTurnIndex + 1) % gameState.players.length;
-                broadcastState();
+            // If deck is empty when forced to draw, skip turn anyway
+            if (room.awaitingFishDraw) {
+                room.awaitingFishDraw = false;
+                room.currentTurnIndex = (room.currentTurnIndex + 1) % room.players.length;
+                broadcastRoomState(currentRoom);
             }
         }
     });
 
     socket.on('manual_fold_check', () => {
-        const player = gameState.players.find(p => p.id === socket.id);
+        if (!currentRoom || !rooms[currentRoom]) return;
+        const room = rooms[currentRoom];
+
+        const player = room.players.find(p => p.id === socket.id);
         if (!player) return;
 
         const counts = {};
@@ -218,52 +266,65 @@ io.on('connection', (socket) => {
         }
 
         if (foldedAny) {
-            addToLog(`🎁 ${player.name} completed and folded a set of 4-of-a-kind!`);
-            io.emit('sound_trigger', 'fold');
+            room.log.push({ id: Date.now(), text: `🎁 ${player.name} folded a completed set of 4-of-a-kind!` });
+            io.to(currentRoom).emit('sound_trigger', 'fold');
         } else {
             socket.emit('error_message', "No 4-of-a-kind sets found to fold.");
         }
-        broadcastState();
+        broadcastRoomState(currentRoom);
     });
 
     socket.on('restart_game', () => {
-        gameState.deck = [];
-        gameState.gameStarted = false;
-        gameState.awaitingFishDraw = false;
-        gameState.log = [];
-        broadcastState();
+        if (!currentRoom || !rooms[currentRoom]) return;
+        const room = rooms[currentRoom];
+        room.deck = [];
+        room.gameStarted = false;
+        room.awaitingFishDraw = false;
+        room.log = [];
+        broadcastRoomState(currentRoom);
     });
 
     socket.on('send_chat', (msg) => {
-        const player = gameState.players.find(p => p.id === socket.id);
+        if (!currentRoom || !rooms[currentRoom]) return;
+        const room = rooms[currentRoom];
+        const player = room.players.find(p => p.id === socket.id);
         const name = player ? player.name : "System";
+
         const chatObj = { name, text: msg };
-        gameState.chatHistory.push(chatObj);
-        if (gameState.chatHistory.length > 30) gameState.chatHistory.shift();
-        io.emit('update_chat', gameState.chatHistory);
+        room.chatHistory.push(chatObj);
+        if (room.chatHistory.length > 30) room.chatHistory.shift();
+
+        io.to(currentRoom).emit('update_chat', room.chatHistory);
     });
 
     socket.on('leave_game', () => {
-        gameState.players = [];
-        gameState.deck = [];
-        gameState.gameStarted = false;
-        gameState.awaitingFishDraw = false;
-        gameState.chatHistory = [];
-        gameState.log = [];
-        io.emit('global_logout_forced');
+        if (currentRoom && rooms[currentRoom]) {
+            socket.leave(currentRoom);
+            rooms[currentRoom].players = rooms[currentRoom].players.filter(p => p.id !== socket.id);
+            if (rooms[currentRoom].players.length === 0) {
+                delete rooms[currentRoom];
+            } else {
+                rooms[currentRoom].currentTurnIndex = rooms[currentRoom].currentTurnIndex % rooms[currentRoom].players.length;
+                updateLobbyNames(currentRoom);
+                broadcastRoomState(currentRoom);
+            }
+        }
+        socket.emit('global_logout_forced');
     });
 
     socket.on('disconnect', () => {
-        gameState.players = gameState.players.filter(p => p.id !== socket.id);
-        if (gameState.players.length === 0) {
-            gameState.gameStarted = false;
-            gameState.awaitingFishDraw = false;
-        } else {
-            gameState.currentTurnIndex = gameState.currentTurnIndex % gameState.players.length;
+        if (currentRoom && rooms[currentRoom]) {
+            rooms[currentRoom].players = rooms[currentRoom].players.filter(p => p.id !== socket.id);
+            if (rooms[currentRoom].players.length === 0) {
+                delete rooms[currentRoom];
+            } else {
+                rooms[currentRoom].currentTurnIndex = rooms[currentRoom].currentTurnIndex % rooms[currentRoom].players.length;
+                updateLobbyNames(currentRoom);
+                broadcastRoomState(currentRoom);
+            }
         }
-        io.emit('global_logout_forced');
     });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🚀 Core Engine server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
