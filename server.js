@@ -241,7 +241,18 @@ io.on('connection', (socket) => {
                 room.currentTurnIndex = (room.currentTurnIndex + 1) % room.players.length;
                 broadcastRoomState(currentRoom);
             }
+            // In socket.on('resolve_request', ...)
+        } elseif (data.action === 'fish'); {
+            // Access the card rank from your data object to show it in the log
+            room.log.push({ 
+                id: Date.now(), 
+                text: `🌊 "Go Fish!" — ${targetPlayer.name} does not have any ${data.rank}s.` 
+            });
+            io.to(currentRoom).emit('sound_trigger', 'fish');
+            room.awaitingFishDraw = true;
+        
         }
+        
     });
 
     socket.on('manual_fold_check', () => {
